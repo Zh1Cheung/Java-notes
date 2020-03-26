@@ -1,0 +1,242 @@
+
+参数映射：ParameterHandler
+SQL解析：SqlSource
+SQL执行：Executor
+结果映射和处理；ResultSetHandler
+
+1.
+SQLSessionFactory初始化（根据配置文件创建SqlSessionFactory）
+	拿到Mybatis全局配置
+	创建SqlSessionFactoryBuilder
+		build()
+			创建解析器XMLConifigBuilder
+				paser()解析configuration里的每一个标签并保存在Configuration中
+			    解析mapper.xml封装成一个MappedStatement
+			    	一个MappedStatement就代表一个增删改查标签的详细信息
+			    build(Configuration)->new DefaultSqlSession()
+	创建DefaultSqlSession并返回，包含了保存全局配置信息的Configuration
+
+2.
+openSession()获取SqlSession对象
+	调用DefaultSqlSessionFasctory的openSession()
+		调用OpenSessionFromDataSource
+			创建事务
+			new Executor()
+				根据Executor在全局配置中的类型，创建出SimpleExecutor/ReuseExecutor/BatchExecutor
+				如果有二级缓存配置开启，创建CachingExecutor
+				使用每一个拦截器重新包装executor并返回
+					interceptorChain.pluginAll(executor)
+				创建DefaultSqlSession并返回，包含了Configuration和Executor
+
+3.
+getMapper获取到接口的代理对象
+	调用DefaultSqlSessionFasctory的getMapper()
+		MapperRegistry调用getMapper()
+			根据接口类型获取MapperProxyFactory
+				newInstance(sqlSession)
+					创建MapperProxy，他是一个InvocationHandler
+						创建并返回MapperProxy代理对象
+
+4. 
+查询实现
+	MapperProxy调用invoke()
+		MapperMethod判断增删改查类型并包装参数
+			SqlSession.selectOne()
+				selectList()
+				获取MappedStatement
+				executor.query()
+					获取BoundSql，他代表sql语句的详细信息
+					查看本地缓存是否有数据，没有就调用queryFromDatabase，查出以后保存在本地缓存
+						doQuery()
+							select查询标签里有statementType就是statementHandler 因为是ResultType 所以是PreparedstatementHandler
+							创建StatementHandler对象（其实是PreparedStatementHandler对象）(interceptorChain.pluginAll(statementHandler))
+								创建ParameterHander
+									interceptorChain.pluginAll(parameterHandler)
+								创建ResultSetHander
+									interceptorChain.pluginAll(resultSetHandler)
+								预编译sql产生PreparedStatement对象
+								调用parameterHandler设置参数	
+								调用TypeHandler给sql预编译设置参数
+								查出数据使用ResultSetHandler处理结果，结果使用TypeHandler获取value值
+			返回list的第一个	
+
+四大对象：
+	Executor StatementHander ParameterHander ResultSetHander
+
+查询流程总结：
+代理对象
+	包含了DefaultSqlSession
+		使用Executot执行增删改查
+			创建statementHander处理Sql语句预编译
+				通过ParameterHander设置参数
+				通过ResultSetHander处理结果
+				通过TypeHander进行数据类型映射
+
+所有的底层操作都是调用JDBC获得PrepareStatement
+
+
+
+
+
+简化流程：
+
+	 1、获取sqlSessionFactory对象:
+	 		解析文件的每一个信息保存在Configuration中，返回包含Configuration的DefaultSqlSession；
+	 		注意：【MappedStatement】：代表一个增删改查的详细信息
+	 
+	 2、获取sqlSession对象
+	 		返回一个DefaultSQlSession对象，包含Executor和Configuration;
+	 		这一步会创建Executor对象；
+	 
+	 3、获取接口的代理对象（MapperProxy）
+	 		getMapper，使用MapperProxyFactory创建一个MapperProxy的代理对象
+	 		代理对象里面包含了，DefaultSqlSession（Executor）
+	 4、执行增删改查方法
+	 
+	 总结：
+	 	1、根据配置文件（全局，sql映射）初始化出Configuration对象
+	 	2、创建一个DefaultSqlSession对象，
+	 		他里面包含Configuration以及
+	 		Executor（根据全局配置文件中的defaultExecutorType创建出对应的Executor）
+	  3、DefaultSqlSession.getMapper（）：拿到Mapper接口对应的MapperProxy；
+	  4、MapperProxy里面有（DefaultSqlSession）；
+	  5、执行增删改查方法：
+	  		1）、调用DefaultSqlSession的增删改查（Executor）；
+	  		2）、会创建一个StatementHandler对象。
+	  			（同时也会创建出ParameterHandler和ResultSetHandler）
+	  		3）、调用StatementHandler预编译参数以及设置参数值;
+	  			使用ParameterHandler来给sql设置参数
+	  		4）、调用StatementHandler的增删改查方法；
+	  		5）、ResultSetHandler封装结果
+	  注意：
+	  	四大对象每个创建的时候都有一个interceptorChain.pluginAll(parameterHandler);
+	 
+
+
+
+------
+
+
+
+插件原理：
+
+	 在四大对象创建的时候
+	 1、每个创建出来的对象不是直接返回的，而是
+	 		调用interceptorChain.pluginAll(parameterHandler)返回的;
+	 		如果在注解中则调用plugin创建代理对象，不在就直接返回
+	 2、获取到所有的Interceptor（拦截器）（插件需要实现的接口）；
+	 		调用interceptor.plugin(target);返回target包装后的对象
+	 3、插件机制，我们可以使用插件为目标对象创建一个代理对象
+	 		我们的插件可以为四大对象创建出代理对象；
+	 		代理对象就可以拦截到四大对象的每一个执行；
+	 
+	public Object pluginAll(Object target) {
+		for (Interceptor interceptor : interceptors) {
+		  target = interceptor.plugin(target);
+		}
+		return target;
+	  }
+
+
+
+	 插件编写：
+	 1、编写Interceptor的实现类
+	 2、使用@Intercepts注解完成插件签名
+	 3、将写好的插件注册到全局配置文件中
+	 
+
+
+/**
+ * 完成插件签名：
+ *		告诉MyBatis当前插件用来拦截哪个对象的哪个方法
+ */
+@Intercepts(
+		{
+			@Signature(type=StatementHandler.class,method="parameterize",args=java.sql.Statement.class)
+		})
+public class MyFirstPlugin implements Interceptor{
+
+	/**
+	 * 
+	 * 	拦截目标对象的目标方法的执行（select * from table where id = #{id} ）
+	 * 	
+	 */
+	@Override
+	public Object intercept(Invocation invocation) throws Throwable {
+		//获取注解中的方法
+		System.out.println("MyFirstPlugin...intercept:"+invocation.getMethod());
+		//动态的改变一下sql运行的参数：以前1号员工，实际从数据库查询11号员工
+		//获取注解中的对象
+		Object target = invocation.getTarget();
+		System.out.println("当前拦截到的对象："+target);
+		//获取：StatementHandler==>ParameterHandler===>parameterObject
+		//获取target的元数据
+		MetaObject metaObject = SystemMetaObject.forObject(target);
+		Object value = metaObject.getValue("parameterHandler.parameterObject");
+		// #{id}
+		System.out.println("sql语句用的参数是："+value);
+		//修改完sql语句要用的参数
+		metaObject.setValue("parameterHandler.parameterObject", 11);
+		//执行目标方法
+		Object proceed = invocation.proceed();
+		//返回执行后的返回值
+		return proceed;
+	}
+
+	/**
+	 * 
+	 * 	包装：为目标对象创建一个代理对象
+	 * 	
+	 */
+	@Override
+	public Object plugin(Object target) {
+		//我们可以借助Plugin的wrap方法来使用当前Interceptor包装我们目标对象(四大对象)
+		System.out.println("MyFirstPlugin...plugin:mybatis将要包装的对象"+target);
+		// 内部调用Proxy.newInstance()创建动态代理对象
+		// 调用invoke方法执行interceptor.intercept() 先执行插件的intercept方法，再执行目标方法
+		Object wrap = Plugin.wrap(target, this);
+		return wrap;
+	}
+
+	/**
+	 * 
+	 * 	将插件注册时的property属性设置进来
+	 * 	
+	 */
+	@Override
+	public void setProperties(Properties properties) {
+		System.out.println("插件配置的信息："+properties);
+	}
+
+}
+
+
+
+多个插件：
+
+	四大对象按照插件配置顺序先后执行plugin()创建动态代理对象(First在前，Second在后)
+		First插件先产生一个代理对象
+		Second拦截后又产生一个代理对象(包裹了以前的代理对象)
+	intercept()执行目标对象方法(Second在前，First在后)
+		要执行StatementHandler就要从Second一层一层往里执行
+
+
+
+-------
+
+分页插件：PageHelper
+
+    EmployeeMapper mapper = openSession.getMapper(EmployeeMapper.class);
+    // 1. 分页 2. 查询 3. 返回
+    // (页数，每页的条数)
+    PageHelper.startPage(4, 5);
+    List<Employee> emps = mapper.getEmps();
+    // PageInfo<Employee> info = new PageInfo<>(emps);
+    // PageInfo封装返回结果 ，要连续显示多少页（5）
+    PageInfo<Employee> info = new PageInfo<>(emps, 5);
+    System.out.println("当前页码：" + info.getPageNum());
+    System.out.println("总记录数：" + info.getTotal());
+    System.out.println("每页的记录数：" + info.getPageSize());
+    System.out.println("总页码：" + info.getPages());
+    System.out.println("是否第一页：" + info.isIsFirstPage());
+ 
