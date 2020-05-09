@@ -561,7 +561,7 @@ Master Eligible Nodes & 选主的过程
 	⼀个节点默认情况下是⼀个 Master eligible，data and ingest node:
 
 节点类型 			配置参数 				默认值
-maste 				eligible node.master 	true
+maste eligible      node.master 	        true
 data 				node.data 				true
 ingest 				node.ingest 			ture
 coordinating only 	⽆ 						设置上⾯三个参数全部为false
@@ -612,7 +612,7 @@ Replica Shard - 提⾼数据可⽤性
 
 单节点集群
 	Node1
-	P0 P1 P1
+	P0 P1 P2
 
 	副本⽆法分⽚，集群状态⻩⾊（主分片和副本分片必须分配在不同节点上）
 PUT tmdb
@@ -625,7 +625,7 @@ PUT tmdb
 
 	增加⼀个数据节点
 		Node1            Node2
-		p0 p1 p1 		 r0 r1 r2
+		p0 p1 p2		 r0 r1 r2
 
 		集群状态转为绿⾊
 		集群具备故障转移能⼒

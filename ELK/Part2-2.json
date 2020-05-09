@@ -2042,7 +2042,7 @@ PUT tech_blogs/_doc/1
 
 POST _ingest/pipeline/_simulate
 {
-  "pipeline": {
+  "pipeline": { 
     "description": "to split blog tags",
     "processors": [
       {
