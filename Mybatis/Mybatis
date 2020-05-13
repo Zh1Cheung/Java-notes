@@ -56,8 +56,7 @@ getMapper获取到接口的代理对象
 									interceptorChain.pluginAll(resultSetHandler)
 								预编译sql产生PreparedStatement对象
 								调用parameterHandler设置参数	
-								调用TypeHandler给sql预编译设置参数
-								查出数据使用ResultSetHandler处理结果，结果使用TypeHandler获取value值
+								查出数据使用ResultSetHandler处理结果，结果使用TypeHandler进行数据类型映射获取value值
 			返回list的第一个	
 
 四大对象：
