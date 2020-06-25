@@ -41,7 +41,7 @@
   - wait方法的语义有两个，一个是释放当前的对象锁、另一个是使得当前线程进入阻塞队列，而这些操作都和monitor是相关的，所以wait必须要获得一个monitor。
   - WaitSet 主要是存放在同步块中执行 wait 方法的线程。配合 EntryList 就是 对象 的 wait 和 notify(notifyAll) 的底层实现。
 - 那么这两类集合中的线程都是在什么条件下可以转变为RUNNABLE呢？
-  - 对于Entry Set中的线程，当获得对象锁的时候，JVM会唤醒处于Entry Set中的某一个线程，这个线程的状态就从BLOCKED转变为RUNNABLE。
+  - 对于Entry List中的线程，当获得对象锁的时候，JVM会唤醒处于Entry Set中的某一个线程，这个线程的状态就从BLOCKED转变为RUNNABLE。
   - 对于Wait Set中的线程，当对象的notify()方法被调用时，JVM会唤醒处于Wait Set中的某一个线程，这个线程的状态就从WAITING转变为BLOCKED；或者当notifyAll()方法被调用时，Wait Set中的全部线程会转变为BLOCKED状态。所有Wait Set中被唤醒的线程会被转移到Entry Set中。然后同上
 -  notify执行之后立马唤醒线程吗
   - 其实hotspot里真正的实现是退出同步块的时候才会去真正唤醒对应的线程

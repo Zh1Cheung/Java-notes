@@ -48,12 +48,12 @@
       没有非空闲时间，即keepAliveTime为0
       阻塞队列为无界队列LinkedBlockingQueue
     - newFixedThreadPool使用了无界的阻塞队列LinkedBlockingQueue，如果线程获取一个任务后，任务的执行时间比较长，会导致队列的任务越积越多，导致机器内存使用不停飙升
-  - newCachedThreadPool(可缓存线程的线程池)
+  - newSingleThreadExecutor(单线程的线程池)
     - 核心线程数为1
       最大线程数也为1
       阻塞队列是LinkedBlockingQueue
       keepAliveTime为0
-  - newSingleThreadExecutor(单线程的线程池)
+  - newCachedThreadPool(可缓存线程的线程池)
     - 核心线程数为0
       最大线程数为Integer.MAX_VALUE
       阻塞队列是SynchronousQueue
@@ -191,7 +191,6 @@
     // -1的补码为：111-11111111111111111111111111111
     // 左移29位后：111-00000000000000000000000000000
     // 高3位111的值就是表示线程池正在处于运行状态
-    private static final int RUNNING = -1 << COUNT_BITS;
     private static final int RUNNING    = -1 << COUNT_BITS;
     private static final int SHUTDOWN   =  0 << COUNT_BITS;
     private static final int STOP       =  1 << COUNT_BITS;
@@ -249,7 +248,7 @@
         ctl.addAndGet(-1);
     }
     ```
-
+  
 - 线程池状态的跃迁
 
   - ![img](https://throwable-blog-1256189093.cos.ap-guangzhou.myqcloud.com/201907/j-u-c-t-p-e-2.png)

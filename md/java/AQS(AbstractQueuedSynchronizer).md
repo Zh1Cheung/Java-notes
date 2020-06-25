@@ -85,21 +85,21 @@
   - Object的wait和notify/notify是与对象监视器配合完成线程间的等待/通知机制，Condition与Lock配合完成等待/通知机制
   - 前者是java底层级别的，后者是语言级别的，具有更高的可控制性和扩展性
   - Condition能够支持不响应中断，而通过使用Object方式不支持；
-  2. Condition能够支持多个等待队列（new 多个Condition对象），而Object方式只能支持一个；
-  3. Condition能够支持超时时间的设置，而Object不支持
-  3. 等待/通知机制，通过使用condition提供的await和signal/signalAll方法就可以实现这种机制，而这种机制能够解决最经典的问题就是“生产者与消费者问题”
+  - Condition能够支持多个等待队列（new 多个Condition对象），而Object方式只能支持一个；
+  - Condition能够支持超时时间的设置，而Object不支持
+  - 等待/通知机制，通过使用condition提供的await和signal/signalAll方法就可以实现这种机制，而这种机制能够解决最经典的问题就是“生产者与消费者问题”
 
 - 参照Object的wait和notify/notifyAll方法，Condition也提供了同样的方法：
 
-  3. await() ，当前线程进入等待状态，如果其他线程调用condition的signal或者signalAll方法并且当前线程获取Lock从await方法返回，如果在等待状态中被中断会抛出被中断异常；
-  3. awaitNanos(long nanosTimeout)：当前线程进入等待状态直到被通知，中断或者超时；
-  3. await(long time, TimeUnit unit)：同第二种，支持自定义时间单位
-  3. awaitUntil(Date deadline) ：当前线程进入等待状态直到被通知，中断或者到了某个时间
+  - await() ，当前线程进入等待状态，如果其他线程调用condition的signal或者signalAll方法并且当前线程获取Lock从await方法返回，如果在等待状态中被中断会抛出被中断异常；
+  - awaitNanos(long nanosTimeout)：当前线程进入等待状态直到被通知，中断或者超时；
+  - await(long time, TimeUnit unit)：同第二种，支持自定义时间单位
+  - awaitUntil(Date deadline) ：当前线程进入等待状态直到被通知，中断或者到了某个时间
 
 - 针对Object的notify/notifyAll方法
 
-  3. signal()：唤醒一个等待在condition上的线程，将该线程从等待队列中转移到同步队列中，如果在同步队列中能够竞争到Lock则可以从等待方法中返回。
-  3. signalAll()：与1的区别在于能够唤醒所有等待在condition上的线程
+  - signal()：唤醒一个等待在condition上的线程，将该线程从等待队列中转移到同步队列中，如果在同步队列中能够竞争到Lock则可以从等待方法中返回。
+  - signalAll()：与1的区别在于能够唤醒所有等待在condition上的线程
 
 - await实现原理
 

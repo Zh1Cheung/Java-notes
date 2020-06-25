@@ -58,10 +58,8 @@
     - 其实一个 Cell 的本质就是一个 volatile 修饰的 long 值，且这个值能够进行 cas 操作
     - 其实我们可以发现，LongAdder 使用了一个 cell 列表去承接并发的 cas，以提升性能，但是 LongAdder 在统计的时候如果有并发更新，可能导致统计的数据有误差。
 
-  - 
-
   - ```java
-    // 使用 ConcurrentHashMap 的原子性方法 computeIfAbsent 来做复合逻辑操作，判断Key 是否存在 Value，如果不存在则把 Lambda 表达式运行后的结果放入 Map 作为Value，也就是新创建一个 LongAdder 对象，最后返回 Value。
+  // 使用 ConcurrentHashMap 的原子性方法 computeIfAbsent 来做复合逻辑操作，判断Key 是否存在 Value，如果不存在则把 Lambda 表达式运行后的结果放入 Map 作为Value，也就是新创建一个 LongAdder 对象，最后返回 Value。
     // 由于 computeIfAbsent 方法返回的 Value 是 LongAdder，是一个线程安全的累加器，因此可以直接调用其 increment 方法进行累加。
     ConcurrentHashMap<String, LongAdder> freqs=new ConcurrentHashMap<>();
     ForkJoinPool forkJoinPool =new ForkJoinPool(10);
@@ -78,7 +76,7 @@
                             e->e.getValue().longValue())
                     );
     ```
-
+  
 - 没有认清并发工具的使用场景，因而导致性能问题
 
   - 在 Java 中，CopyOnWriteArrayList 虽然是一个线程安全的 ArrayList，但因为其实现方式是，每次修改数据时都会复制一份数据出来，所以有明显的适用场景，即读多写少或者说希望无锁读的场景。
@@ -220,10 +218,8 @@
 
   - 不知道你有没有想过：Java 线程池是先用工作队列来存放来不及处理的任务，满了之后再扩容线程池。当我们的工作队列设置得很大时，最大线程数这个参数显得没有意义，因为队列很难满，或者到满的时候再去扩容线程池已经于事无补了。
 
-  - 
-
   - ```java
-    // 使用Java 7 LinkedTransferQueue并进行offer()调用tryTransfer()。当有一个正在等待的使用者线程时，任务将被传递给该线程。否则，offer()将返回false ThreadPoolExecutor并将产生一个新线程。
+  // 使用Java 7 LinkedTransferQueue并进行offer()调用tryTransfer()。当有一个正在等待的使用者线程时，任务将被传递给该线程。否则，offer()将返回false ThreadPoolExecutor并将产生一个新线程。
     // submit()方法是调用了workQueue的offer()方法来塞入task，而offer()方法是非阻塞的，当workQueue已经满的时候，offer()方法会立即返回false，并不会阻塞在那里等待workQueue有空出位置，所以要让submit()阻塞，关键在于改变向workQueue添加task的行为
     // 这就达到了想要的效果：当workQueue满时，submit()一个task会导致调用我们自定义的RejectedExecutionHandler，而我们自定义的RejectedExecutionHandler会保证该task继续被尝试用阻塞式的put()到workQueue中。
     BlockingQueue<Runnable> queue = new LinkedTransferQueue<Runnable>() {
@@ -244,7 +240,7 @@
             }
         });
     ```
-
+  
 - 务必确认清楚线程池本身是不是复用的
 
   - 这样一个事故：某项目生产环境时不时有报警提示线程数过多，超过2000 个，收到报警后查看监控发现，瞬时线程数比较多但过一会儿又会降下来，线程数抖动很厉害，而应用的访问量变化不大。
@@ -274,10 +270,4 @@
 
   - 每次请求都新建线程池，每个线程池的核心数都是10, 虽然自定义线程池设置2秒回收，但是没超过线程池核心数10是不会被回收的, 不间断的请求过来导致创建大量线程，最终OOM
   - ThreadPoolExecutor回收不了，工作线程Worker是内部类，只要它活着，换句话说线程在跑，就会阻止ThreadPoolExecutor回收，所以其实ThreadPoolExecutor是无法回收的，并不能认为ThreadPoolExecutor没有引用就能回收
-
-- 
-
-  
-
-
 

@@ -120,7 +120,8 @@
 
 - 关于在 finally 代码块中抛出异常的坑，如果在 finally 代码块中返回值，你觉得程序会以 try 或 catch 中返回值为准，还是以 finally 中的返回值为准呢？
 
-  - JVM采用异常表控制try-catch的跳转逻辑；对于finally中的代码块其实是复制到try和catch中的return和throw之前的方式来处理的。
+  - JVM采用异常表控制try-catch的跳转逻辑；
+  - 对于finally中的代码块其实是复制到try和catch中的return和throw之前的方式来处理的。
 
 
 

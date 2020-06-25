@@ -110,14 +110,13 @@
 
 - quals比较的对象除了所谓的相等外，还有一个非常重要的因素，就是该对象的类加载器也必须是同一个，不然equals返回的肯定是false
 
-  - 重启后，两个对象相等，
-    结果是true，但是修改了某些东西后，热加载（不用重启即可生效）后，再次执行equals，返回就是false，因为热加载使用的类加载器和程序正常启动的类加载器不同
-
+  - 重启后，两个对象相等，结果是true，但是修改了某些东西后，热加载（不用重启即可生效）后，再次执行equals，返回就是false，因为热加载使用的类加载器和程序正常启动的类加载器不同
   
 
   
 
   
+
 
 ## 数值计算
 
@@ -160,7 +159,7 @@
 
 - 小心数值溢出问题
 
-  - 方法一是，考虑使用 Math 类的 addExact、subtractExact 等 xxExact 方法进行数值运算，这些方法可以在数值溢出时主动抛出异常。（执行后，可以得到 ArithmeticException，这是一个 RuntimeException）
+  - 方法一是，考虑使用 Math 类的 addExact、subtractExact 等 xxExact 方法进行数值运算，这些方法可以在数值溢出时主动抛出异常。（执行后，可以得到 ArithmeticException，这是一个RuntimeException）
   - 方法二是，使用大数类 BigInteger。BigDecimal 是处理浮点数的专家，而 BigInteger 则是对大数进行科学计算的专家。
 
 
