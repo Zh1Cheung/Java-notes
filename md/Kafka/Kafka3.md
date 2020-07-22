@@ -1,8 +1,10 @@
 ## 认证机制
 
 - 认证是指通过一定的手段，完成对用户身份的确认。授权一般是指对信息安全或计算机安全相关的资源定义与授予相应的访问权限
-- SASL/SCRAM-SHA-256 配置实例
-  - 第 1 步：创建用户
+
+- SASL/SCRAM-SHA-256 配如示例的
+  
+- - 第 1 步：创建用户
     - 在本次测试中，我会创建 3 个用户，分别是 admin 用户、writer 用户和 reader 用户。admin 用户用于实现Broker 间通信，writer 用户用于生产消息，reader 用户用于消费消息
   - 第 2 步：创建 JAAS 文件
     - 在实际场景中，你需要为每台单独的物理 Broker 机器都创建一份 JAAS 文件
@@ -13,7 +15,7 @@
     - 由于启用了认证，客户端需要做一些相应的配置。我们创建一个名为 producer.conf 的配置文件
   - 第 5 步：消费消息
     - 接下来，我们使用 Console Consumer 程序来消费一下刚刚生产的消息。同样地，我们需要为 kafka-console-consumer 脚本创建一个名为 consumer.conf 的脚本
-
+  
 - > kafka-acls 脚本
   > 	如果我们要为用户 Alice 增加了集群级别的所有权限，那么我们可以使用下面这段命令。
   > 	$ kafka-acls --authorizer-properties zookeeper.connect=localhost:2181 --add --allow-principal User:Alice --operation All --topic '\*' --cluster
