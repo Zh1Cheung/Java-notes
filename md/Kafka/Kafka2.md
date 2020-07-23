@@ -157,31 +157,29 @@
     > 2. 更新分区高水位值。
     > i. 获取 Leader 副本所在 Broker 端保存的所有远程副本 LEO 值{LEO-1，LEO-2，……，LEO-n}。
     > ii. 获取 Leader 副本高水位值：currentHW。
-    > iii. 更新 currentHW = min(currentHW, LEO-1，LEO-2，……，LEO-n)。
-
+    > iii. 更新 currentHW = max{currentHW,min(LEO-1，LEO-2，……，LEO-n)}。
+>
+    > 
+    >
     > 处理 Follower 副本拉取消息的逻辑如下：
-  >
+    >
     > 1. 读取磁盘（或页缓存）中的消息数据。
     > 2. 使用 Follower 副本发送请求中的位移值更新远程副本 LEO 值。
     > 3. 更新分区高水位值（具体步骤与处理生产者请求的步骤相同）。
-  
-- Follower 副本
-  
-  - > 从 Leader 拉取消息的处理逻辑如下： 
+    
+  - Follower 副本
+    
+    > 从 Leader 拉取消息的处理逻辑如下： 
     >
     > 1. 写入消息到本地磁盘。 
-    >
     > 2. 更新 LEO 值。 
-    >
     > 3. 更新高水位值。 
     >
-    >    i. 获取 Leader 发送的高水位值：currentHW。 
+    > i. 获取 Leader 发送的高水位值：currentHW。 
     >
-    >    ii. 获取步骤 2 中更新过的 LEO 值：currentLEO。 
+    > ii. 获取步骤 2 中更新过的 LEO 值：currentLEO。 
     >
-    >    iii. 更新高水位为 min(currentHW, currentLEO)。
-
-
+    > iii. 更新高水位为 min(currentHW, currentLEO)。
 
 - 副本同步机制
   - 使用一个单分区且有两个副本的主题
