@@ -120,14 +120,21 @@
 
 - 内置分词器
 
-  - 	# standard Analyzer - 默认分词器，按词切分，小写处理
-    	# Simple Analyzer – 按照非字母切分（符号被过滤），小写处理
-    	# Stop Analyzer – 小写处理，停用词过滤（the，a，is）
-    	# Whitespace Analyzer – 按照空格切分，不转小写
-    	# Keyword Analyzer – 不分词，直接将输入当作输出
-    	# Patter Analyzer – 正则表达式，默认 \W+ (非字符分隔)
-    	# Language – 提供了30多种常见语言的分词器
-    	# Cusromer Analyzer - 自定义分词器
+  - 	standard Analyzer - 默认分词器，按词切分，小写处理
+      	
+      	Simple Analyzer – 按照非字母切分（符号被过滤），小写处理
+      	
+      	Stop Analyzer – 小写处理，停用词过滤（the，a，is）
+      	
+      	Whitespace Analyzer – 按照空格切分，不转小写
+      	
+      	Keyword Analyzer – 不分词，直接将输入当作输出
+      	
+      	Patter Analyzer – 正则表达式，默认 \W+ (非字符分隔)
+      	
+      	Language – 提供了30多种常见语言的分词器
+      	
+      	Cusromer Analyzer - 自定义分词器
 
 - ```json
   PUT /artists/
@@ -367,6 +374,7 @@
 ## 单字符串多字段查询
 
 - Dis Max Query
+  
   - 不应该将分数简单叠加，而是应该找到单个最佳匹配的字段的评分
 - 最佳字段查询调优
   - 有⼀些情况下，同时匹配 title 和 body 字段的⽂档⽐只与⼀个字段匹配的⽂档的相关度更⾼
