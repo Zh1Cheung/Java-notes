@@ -91,10 +91,6 @@
 
 
 
-
-
-
-
 ## 多路I/O复用模型
 
 - 复用是指一个线程可以服务多条IO流，I/O multiplexing 这里面的 multiplexing 指的其实是在单个线程通过记录跟踪每一个Socket(I/O流)的状态来同时管理多个I/O流。

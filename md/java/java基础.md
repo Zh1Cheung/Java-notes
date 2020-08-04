@@ -255,44 +255,6 @@
 
 
 
-## 反射
-
-- 在Java运行环境中，对于任意一个类，可以知道这个类有哪些属性和方法
-
-- 获取Class对象的三种方式
-
-  - 通过类名获取 —类名.class  
-  - 通过对象获取 —对象名.getClass()
-  - 通过全类名获取— Class.forName(全类名)
-
-- newInstance() 创建了一个实例，调用的哪一个构造方法呢
-
-  - 我们在定义一个类的时候，定义一个有参数的构造器，作用是对属性进行初始化，还要写一个无参数的构造器，作用就是反射时候用
-
-- ClassLoader
-
-  - 类加载器是用来把类(class)加载进 JVM 的
-  - 反射的作用就是对Class对象在运行出结果之前动态的修改
-
-- 反射的常用类和函数:Java反射机制的实现要借助于4个类：Class，Constructor，Field，Method；
-
-  - ```java
-    Class clazz = Class.forName(classname);
-    Method m = clazz.getMethod(methodname);
-    Constructor c = clazz.getConstructor();
-    Object service = c.newInstance();
-    m.invoke(service);
-    ```
-
-- getMethods()与getDeclaredMethods()区别
-
-  - getMethods(),该方法是获取本类以及父类或者父接口中所有的公共方法(public修饰符修饰的)
-  - getDeclaredMethods(),该方法是获取本类中的所有方法，包括私有的(private、protected、默认以及public)的方法。
-
-
-
-
-
 ## 创建对象
 
 - 使用new关键字

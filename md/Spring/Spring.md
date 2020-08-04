@@ -1,7 +1,21 @@
 ## 介绍
 
 - 轻量级的 DI / IoC 和 AOP 容器的开源框架
+  
+  - IoC，其实就是一种设计思想。使用 Spring 来实现 IoC，意味着将你设计好的对象交给Spring 容器控制，而不是直接在对象内部控制。
+    
+    - 或许你能想到的是，使用 IoC 方便、可以实现解耦。但在我看来，相比于这两个原因，更重要的是 IoC 带来了更多的可能性。 
+    
+    - 如果以容器为依托来管理所有的框架、业务对象，我们不仅可以无侵入地调整对象的关系，还可以无侵入地随时调整对象的属性，甚至是实现对象的替换。这就使得框架开发者在程序 
+    
+      背后实现一些扩展不再是问题，带来的可能性是无限的。比如我们要监控的对象如果是Bean，实现就会非常简单。所以，这套容器体系，不仅被 Spring Core 和 Spring Boot 大量依赖，还实现了一些外部框架和 Spring 的无缝整合。
+    
   - AOP其实只是OOP的补充而已。OOP从横向上区分出一个个的类来，而AOP则从纵向上向对象中加入特定的代码。
+  
+  - AOP，体现了松耦合、高内聚的精髓，在切面集中实现横切关注点（缓存、权限、日志等），然后通过切点配置把代码注入合适的地方。切面、切点、增强、连接点，是 AOP 中 
+  
+    非常重要的概念
+  
   - ioc
     - BeanFactory
       - BeanFactory是个Factory，也就是IOC容器或对象工厂，FactoryBean是个Bean
@@ -9,30 +23,61 @@
       -  FactoryBean也是接口，为IOC容器中Bean的实现加上了一个简单工厂模式
     -  ApplicationContext
       - ApplicationContext 是 BeanFactory 的子接口之一，对 BeanFactory 功能做了许多的扩展
+  
 - 过滤器和拦截器
   - 过滤器和拦截器最大的区别在于：过滤器是servlet的规范规定的，只能用于过滤请求，而interceptor是Spring里面面向切面编程的一种实现
     - 拦截器是基于java的反射机制的，而过滤器是基于函数回调。
     - 拦截器不依赖与servlet容器，过滤器依赖与servlet容器。
     - 拦截器可以多次被调用，而过滤器只能在容器初始化时被调用一次。
     - 拦截器可以获取IOC容器中的各个bean，而过滤器不行
-- Bean的生命周期
-  - 调用postProcessBeanFactory()方法
-  - 实例化bean对象
-    - 实例化Bean之前调用postProcessBeforeInstantiation()方法
-    - 实例化Bean之后调用该接口的postProcessAfterInstantiation()方法
-    - 声明，只生成对象不赋值的过程。
-      初始化，是给对象赋值的过程。
-      实例化，是使用new为对象分配内存的过程。
-  - 设置对象属性
-  - 如果Bean实现了BeanNameAware，工厂调用Bean的setBeanName()方法传递Bean的ID
-  - 如果Bean实现了BeanFactoryAware，工厂调用setBeanFactory()方法传入工厂自身
-  - 如果Bean实现了ApplicationContextAware，调用接口的setApplicationContext()方法，将ApplicationContext实例设置到Bean中
-  - 调用Bean的初始化方法   init-method属性
-    - 调用Bean的初始化方法之前  将Bean实例传递给Bean的前置处理器的postProcessBeforeInitialization
-    - 调用Bean的初始化方法之后  将Bean实例传递给Bean的后置处理器的postProcessAfterInitialization
-  - 使用Bean容器关闭之前，调用Bean的销毁方法
+  
 
 
+
+## Bean的生命周期
+
+- 调用postProcessBeanFactory()方法
+- 实例化bean对象
+  - 实例化Bean之前调用postProcessBeforeInstantiation()方法
+  - 实例化Bean之后调用该接口的postProcessAfterInstantiation()方法
+  - 声明，只生成对象不赋值的过程。
+    初始化，是给对象赋值的过程。
+    实例化，是使用new为对象分配内存的过程。
+- 设置对象属性
+- 如果Bean实现了BeanNameAware，工厂调用Bean的setBeanName()方法传递Bean的ID
+- 如果Bean实现了BeanFactoryAware，工厂调用setBeanFactory()方法传入工厂自身
+- 如果Bean实现了ApplicationContextAware，调用接口的setApplicationContext()方法，将ApplicationContext实例设置到Bean中
+- 如果实现了 InitializingBean 接口，则会调用 afterPropertiesSet 方法
+- 调用Bean的初始化方法   init-method属性
+  - 调用Bean的初始化方法之前  将Bean实例传递给Bean的前置处理器的postProcessBeforeInitialization
+  - 调用Bean的初始化方法之后  将Bean实例传递给Bean的后置处理器的postProcessAfterInitialization
+- 使用Bean容器关闭之前，调用Bean的销毁方法
+
+
+
+
+
+## 作用域
+
+- Spring Bean 有五个作用域，其中最基础的有下面两种
+  - Singleton，这是 Spring 的默认作用域，也就是为每个 IOC 容器创建唯一的一个 Bean实例。
+  - Prototype，针对每个 getBean 请求，容器都会单独创建一个 Bean 实例
+  - 从 Bean 的特点来看，Prototype 适合有状态的 Bean，而 Singleton 则更适合无状态的情况。另外，使用 Prototype 作用域需要经过仔细思考，毕竟频繁创建和销毁 Bean 是有明显开销的
+- 如果是 Web 容器，则支持另外三种作用域
+  - Request，为每个 HTTP 请求创建单独的 Bean 实例。
+  - Session，很显然 Bean 实例的作用域是 Session 范围。
+  - GlobalSession，用于 Portlet 容器，因为每个 Portlet 有单独的 Session，GlobalSession 提供一个全局性的 HTTP Session
+
+- 他们是什么时候创建的:
+  - 一个单例的bean,而且lazy-init属性为false(默认),在Application Context创建的时候构造
+  - 一个单例的bean,lazy-init属性设置为true,那么,它在第一次需要的时候被构造.
+  - 其他scope的bean,都是在第一次需要使用的时候创建
+
+- 他们是什么时候销毁的:
+  - 单例的bean始终 存在与application context中, 只有当 application 终结的时候,才会销毁
+  - 和其他scope相比,Spring并没有管理prototype实例完整的生命周期,在实例化,配置,组装对象交给应用后,spring不再管理.只要bean本身不持有对另一个资源（如数据库连接或会话对象）的引用，只要删除了对该对象的所有引用或对象超出范围，就会立即收集垃圾.
+  - Request: 每次客户端请求都会创建一个新的bean实例,一旦这个请求结束,实例就会离开scope,被垃圾回收.
+  - Session: 如果用户结束了他的会话,那么这个bean实例会被GC.
 
 
 
@@ -61,7 +106,8 @@
 - 五、回滚规则
   - 默认情况下，事务只有遇到运行期异常时才会回滚，而在遇到检查型异常时不会回滚
 
-
+- 声明式事务其实说白了是一种特殊的aop应用，它其实包括两种advice，一种是around，另外一种是after-throwing。利用around advice在方法执行前，先关闭数据库的自动提交功能，然后设定一个标志符。根据业务代码实际的情况，对标志符赋不同的值，如果数据更新成功赋true，否则false。在业务方法执行完之后的部分对标志符进行处理。如为true，则提交数据库操作，否则就进行回滚。
+  另外还会使用after-throwing，对出错的信息进行记录。然后再将错误抛出至上层。
 
 
 
@@ -244,47 +290,3 @@
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-## Spring Session
