@@ -100,7 +100,75 @@
     >
     > Appendfsync no //完全依赖os,性能最好，持久化没有保证。
 
-  - 
+  
+  
+- 由于Redis的数据都存放在内存中，如果没有配置持久化，redis重启后数据就全丢失了，于是需要开启redis的持久化功能，将数据保存到磁盘上，当redis重启后，可以从磁盘中恢复数据。redis提供两种方式进行持久化，一种是RDB持久化（原理是将Reids在内存中的数据库记录定时dump到磁盘上的RDB持久化），另外一种是AOF持久化（原理是将Reids的操作日志以追加的方式写入文件）。
+
+  **2、二者的区别**
+
+  RDB持久化是指在指定的时间间隔内将内存中的数据集快照写入磁盘，实际操作过程是fork一个子进程，先将数据集写入临时文件，写入成功后，再替换之前的文件，用二进制压缩存储。
+
+  AOF持久化以日志的形式记录服务器所处理的每一个写、删除操作，查询操作不会记录，以文本的方式记录，可以打开文件看到详细的操作记录。
+
+  
+
+  **3、二者优缺点**
+
+  RDB存在哪些优势呢？
+
+  1). 一旦采用该方式，那么你的整个Redis数据库将只包含一个文件，这对于文件备份而言是非常完美的。比如，你可能打算每个小时归档一次最近24小时的数据，同时还要每天归档一次最近30天的数据。通过这样的备份策略，一旦系统出现灾难性故障，我们可以非常容易的进行恢复。
+
+  2). 对于灾难恢复而言，RDB是非常不错的选择。因为我们可以非常轻松的将一个单独的文件压缩后再转移到其它存储介质上。
+
+  3). 性能最大化。对于Redis的服务进程而言，在开始持久化时，它唯一需要做的只是fork出子进程，之后再由子进程完成这些持久化的工作，这样就可以极大的避免服务进程执行IO操作了。
+
+  4). 相比于AOF机制，如果数据集很大，RDB的启动效率会更高。
+
+  **RDB又存在哪些劣势呢？**
+
+  1). 如果你想保证数据的高可用性，即最大限度的避免数据丢失，那么RDB将不是一个很好的选择。因为系统一旦在定时持久化之前出现宕机现象，此前没有来得及写入磁盘的数据都将丢失。
+
+  2). 由于RDB是通过fork子进程来协助完成数据持久化工作的，因此，如果当数据集较大时，可能会导致整个服务器停止服务几百毫秒，甚至是1秒钟。
+
+  **AOF的优势有哪些呢？**
+
+  1). 该机制可以带来更高的数据安全性，即数据持久性。Redis中提供了3中同步策略，即每秒同步、每修改同步和不同步。事实上，每秒同步也是异步完成的，其效率也是非常高的，所差的是一旦系统出现宕机现象，那么这一秒钟之内修改的数据将会丢失。而每修改同步，我们可以将其视为同步持久化，即每次发生的数据变化都会被立即记录到磁盘中。可以预见，这种方式在效率上是最低的。至于无同步，无需多言，我想大家都能正确的理解它。
+
+  2). 由于该机制对日志文件的写入操作采用的是append模式，因此在写入过程中即使出现宕机现象，也不会破坏日志文件中已经存在的内容。然而如果我们本次操作只是写入了一半数据就出现了系统崩溃问题，不用担心，在Redis下一次启动之前，我们可以通过redis-check-aof工具来帮助我们解决数据一致性的问题。
+
+  3). 如果日志过大，Redis可以自动启用rewrite机制。即Redis以append模式不断的将修改数据写入到老的磁盘文件中，同时Redis还会创建一个新的文件用于记录此期间有哪些修改命令被执行。因此在进行rewrite切换时可以更好的保证数据安全性。
+
+  4). AOF包含一个格式清晰、易于理解的日志文件用于记录所有的修改操作。事实上，我们也可以通过该文件完成数据的重建。
+
+  **AOF的劣势有哪些呢？**
+
+  1). 对于相同数量的数据集而言，AOF文件通常要大于RDB文件。RDB 在恢复大数据集时的速度比 AOF 的恢复速度要快。
+
+  2). 根据同步策略的不同，AOF在运行效率上往往会慢于RDB。总之，每秒同步策略的效率是比较高的，同步禁用策略的效率和RDB一样高效。
+
+  二者选择的标准，就是看系统是愿意牺牲一些性能，换取更高的缓存一致性（aof），还是愿意写操作频繁的时候，不启用备份来换取更高的性能，待手动运行save的时候，再做备份（rdb）。rdb这个就更有些 eventually consistent的意思了。
+
+  **4、常用配置**
+
+  **RDB持久化配置**
+
+  Redis会将数据集的快照dump到dump.rdb文件中。此外，我们也可以通过配置文件来修改Redis服务器dump快照的频率，在打开6379.conf文件之后，我们搜索save，可以看到下面的配置信息：
+
+  save 900 1              #在900秒(15分钟)之后，如果至少有1个key发生变化，则dump内存快照。
+
+  save 300 10            #在300秒(5分钟)之后，如果至少有10个key发生变化，则dump内存快照。
+
+  save 60 10000        #在60秒(1分钟)之后，如果至少有10000个key发生变化，则dump内存快照。
+
+  **AOF**持久化配置
+
+  在Redis的配置文件中存在三种同步方式，它们分别是：
+
+  appendfsync always     #每次有数据修改发生时都会写入AOF文件。
+
+  appendfsync everysec  #每秒钟同步一次，该策略为AOF的缺省策略。
+
+  appendfsync no          #从不同步。高效但是数据不会被持久化。
 
 
 
@@ -583,8 +651,61 @@
 
 - Redis 集群
   - Redis 集群是一个可以在多个 Redis 节点之间进行数据共享的设施
+  - 不同的master可以拥有不同数量的slave，且集群中任意一个节点都与其它所有节点建立了连接，每一个节点都在称为cluster port的端口监听其它节点的集群通信连接。
   - redis3.0上加入了cluster模式，实现的redis的分布式存储，也就是说每台redis节点上存储不同的内容
+  
+- Redis集群数据结构
+
+  -   与集群相关的数据结构主要有**clusterState与clusterNode两个**(在cluster.h源文件中声明)：每一个redis实例拥有唯一一个clusterState实例，即server.cluster；而clusterNode的实例与集群中的节点数目n对应，每一个节点上都拥有n个clusterNode实例表示它知道的n个节点的信息，存储在clusterState结构的nodes成员中。 clusterState中有2个与集群结构相关的成员
+
+    - nodes成员是一个字典，以节点nameid为关键字，指向clusterNode的指针为值。 集群中的节点都有一个nameid，以nameid为索引即可在nodes字典中找到描述该节点信息的clusterNode实例
+
+    ![img](https://img2018.cnblogs.com/blog/1766634/201910/1766634-20191007150900326-80135328.png)
+
+    - 而slots是一个clusterNode结构的指针数组，CLUSTER_SLOTS是redis中定义的支持的slot最大值，所有的key计算得到的slot都小于该值。slots[slot]存储着负责该slot的master节点的clusterNode结构的指针。每一个节点上都拥有该slots数组，因此在任意节点上都可以查找到负责某个slot的主节点的信息。
+
+    ![img](https://img2018.cnblogs.com/blog/1766634/201910/1766634-20191007151048799-1878638016.png)
+
+  - clusterNode结构描述了一个节点的基本信息，如ip，port, cluster port等
+
+  - name即是nodes字典中用作关键字的节点nameid
+
+    slots与clusterState中的slots有所不同，这里以bit的索引作为slot值，以该bit的状态标识该clusterNode对应的节点是否负责该slot。
+
+    slaves与slaveof代表了节点之间的master-slave关系。如果这是一个master节点，那么它的slave节点的clusterNode指针存储在slaves数组中；如果这是一个slave节点，那么slaveof指向了它的master节点的clusterNode。
+
+    link，指向当前节点与该clusterNode代表的节点之间的连接的相关信息，节点之间通过该link定期发送ping/pong消息。
+
+- Redis集群通信结构
+
+  - Redis集群中的节点没有namenode与datanode的区别，每一个节点都维护了所有节点的信息。clusterNode结构中的link指向了当前节点与clusterNode所代表的节点之间的连接，Redis中每一个节点都与它所知道的所有节点之间维护了一个连接，通过这些连接发ping/pong消息，同步集群信息。集群中任意两个节点之间都建立了两个tcp连接，例如有nodeA与nodeB，那么nodeA中代表nodeB的clusterNode中有一个link维护了A主动与B建立的连接，而nodeB中代表nodeA的clusterNode中也有一个link维护了B主动与A建立的连接，即构建了一个全双工的通信链路。假设集群中存在3个节点，那么它们之间的通信结构如下所示：
+
+    ![img](https://img2018.cnblogs.com/blog/1766634/201910/1766634-20191007151629019-940324846.png)
+
+- link的建立与节点发现
+  
+  -  每一个节点都会在cluster port端口监听tcp连接请求，参见clusterInit函数，并且每个节点都有一个定时任务clusterCron，其中会遍历nodes字典，检测其中的clusterNode的link是否建立，如果没有建立连接，那么会主动连接该clusterNode所代表的节点建立连接。如果nodes字典中没有某个节点clusterNode结构，那么便不会与它建立连接。
+    
+      建立clusterNode的时机大致有如下几处：
+    
+    1. 从文件中加载节点信息建立 clusterNode结构，在函数clusterLoadConfig中。
+    2. 客户端执行meet命令告知节点信息，建立相应的clusterNode结构，由函数clusterCommand调用clusterStartHandshake完成。
+    3. 接收到meet类消息，建立与发送方对应的clusterNode结构，在函数clusterProcessPacket中。
+    4. 接收到的ping/pong/meet消息中带有其它不知道的节点信息，建立相应的clusterNode结构，同样在clusterProcessPacket函数中，调用clusterStartHandshake完成。
+    
+      新建立的clusterNode的nameid是随机的，并且此时的clusterNode中flag设置为CLUSTER_NODE_HANDSHAKE状态，表示尚未首次通信。当clusterCron中建立相应的link，并发送ping/meet消息，收到响应消息(Pong)时去除CLUSTER_NODE_HANDSHAKE状态，并将clusterNode的nameid修改为响应消息中附带的nameid，至此成功建立一个方向的连接，反方向的连接由对方主动发起建立。 
+  
+- Redis处理通信的函数结构
+
+  - clusterInit中监听端口cport，注册读事件，响应函数为clusterAcceptHandler。
+  - clusterCron中主动建立连接，并将连接结构保存到clusterNode中的link指针中。注册读事件，响应函数为clusterReadHandler，并主动发送ping/meet消息，若先前未注册写事件，则为该link注册写事件，响应函数为clusterWriteHandler。
+  - clusterAcceptHandler中接受连接后建立link结构(未保存)，并注册读事件，响应函数为clusterReadHandler。
+  -  clusterReadHandler中接收数据，当接收到一个完整的消息后，调用clusterProcessPacket函数处理。
+
+  Redis中定义了集群通信消息的结构，每一个消息至少包含一个消息头，而消息头中包含整个消息的长度，因此clusterReadHandler中可以判断是否接收到一个完整的数据包。
+
 - Redis 集群数据共享
+  
   - Redis 集群使用数据分片（sharding）而非一致性哈希（consistency hashing）来实现
     - 通常的做法是获取 key 的哈希值，然后根据节点数来求模，但这种做法有其明显的弊端，当我们需要增加或减少一个节点时，会造成大量的 key 无法命中，这种比例是相当高的，所以就有人提出了一致性哈希的概念
     - 一致性哈希有四个重要特征：
@@ -623,9 +744,207 @@
 
 
 
+## 9个redis命令
 
+### keys
 
+我把这个命令放在第一位，是因为笔者曾经做过的项目，以及一些朋友的项目，都因为使用`keys`这个命令，导致出现性能毛刺。这个命令的时间复杂度是O(N)，而且redis又是单线程执行，在执行keys时即使是时间复杂度只有O(1)例如SET或者GET这种简单命令也会堵塞，从而导致这个时间点性能抖动，甚至可能出现timeout。
 
+> **强烈建议生产环境屏蔽keys命令**（后面会介绍如何屏蔽）。
+
+### scan
+
+既然keys命令不允许使用，那么有什么代替方案呢？有！那就是`scan`命令。如果把keys命令比作类似`select * from users where username like '%afei%'`这种SQL，那么scan应该是`select * from users where id>? limit 10`这种命令。
+
+官方文档用法如下：
+
+```css
+SCAN cursor [MATCH pattern] [COUNT count]
+```
+
+初始执行scan命令例如`scan 0`。SCAN命令是一个基于游标的迭代器。这意味着命令每次被调用都需要使用上一次这个调用返回的游标作为该次调用的游标参数，以此来延续之前的迭代过程。当SCAN命令的游标参数被设置为0时，服务器将开始一次新的迭代，而**当redis服务器向用户返回值为0的游标时，表示迭代已结束**，这是唯一迭代结束的判定方式，而不能通过返回结果集是否为空判断迭代结束。
+
+使用方式：
+
+```ruby
+127.0.0.1:6380> scan 0
+1) "22"
+2)  1) "23"
+    2) "20"
+    3) "14"
+    4) "2"
+    5) "19"
+    6) "9"
+    7) "3"
+    8) "21"
+    9) "12"
+   10) "25"
+   11) "7"
+```
+
+返回结果分为两个部分：第一部分即1)就是下一次迭代游标，第二部分即2)就是本次迭代结果集。
+
+### slowlog
+
+上面提到不能使用keys命令，如果就有开发这么做了呢，我们如何得知？与其他任意存储系统例如mysql，mongodb可以查看慢日志一样，redis也可以，即通过命令`slowlog`。用法如下：
+
+```css
+SLOWLOG subcommand [argument]
+```
+
+subcommand主要有：
+
+-  **get**，用法：slowlog get [argument]，获取argument参数指定数量的慢日志。
+-  **len**，用法：slowlog len，总慢日志数量。
+-  **reset**，用法：slowlog reset，清空慢日志。
+
+执行结果如下：
+
+```bash
+127.0.0.1:6380> slowlog get 5
+1) 1) (integer) 2
+   2) (integer) 1532656201
+   3) (integer) 2033
+   4) 1) "flushddbb"
+2) 1) (integer) 1  ----  慢日志编码，一般不用care
+   2) (integer) 1532646897  ----  导致慢日志的命令执行的时间点，如果api有timeout，可以通过对比这个时间，判断可能是慢日志命令执行导致的
+   3) (integer) 26424  ----  导致慢日志执行的redis命令，通过4)可知，执行config rewrite导致慢日志，总耗时26ms+
+   4) 1) "config"
+      2) "rewrite"
+```
+
+> 命令耗时超过多少才会保存到slowlog中，可以通过命令`config set slowlog-log-slower-than 2000`配置并且不需要重启redis。注意：单位是微妙，2000微妙即2毫秒。
+
+### rename-command
+
+为了防止把问题带到生产环境，我们可以通过配置文件重命名一些危险命令，例如`keys`等一些高危命令。操作非常简单，只需要在conf配置文件增加如下所示配置即可：
+
+```undefined
+rename-command flushdb flushddbb
+rename-command flushall flushallall
+rename-command keys keysys
+```
+
+### bigkeys
+
+随着项目越做越大，缓存使用越来越不规范。我们如何检查生产环境上一些有问题的数据。`bigkeys`就派上用场了，用法如下：
+
+```undefined
+redis-cli -p 6380 --bigkeys
+```
+
+执行结果如下：
+
+```python
+... ...
+-------- summary -------
+
+Sampled 526 keys in the keyspace!
+Total key length in bytes is 1524 (avg len 2.90)
+
+Biggest string found 'test' has 10005 bytes
+Biggest   list found 'commentlist' has 13 items
+
+524 strings with 15181 bytes (99.62% of keys, avg size 28.97)
+2 lists with 19 items (00.38% of keys, avg size 9.50)
+0 sets with 0 members (00.00% of keys, avg size 0.00)
+0 hashs with 0 fields (00.00% of keys, avg size 0.00)
+0 zsets with 0 members (00.00% of keys, avg size 0.00)
+```
+
+最后5行可知，没有set,hash,zset几种数据结构的数据。string类型有524个，list类型有两个；通过`Biggest ... ...`可知，最大string结构的key是`test`，最大list结构的key是`commentlist`。
+
+需要注意的是，这个**bigkeys得到的最大，不一定是最大**。说明原因前，首先说明`bigkeys`的原理，非常简单，通过scan命令遍历，各种不同数据结构的key，分别通过不同的命令得到最大的key：
+
+- 如果是string结构，通过`strlen`判断；
+- 如果是list结构，通过`llen`判断；
+- 如果是hash结构，通过`hlen`判断；
+- 如果是set结构，通过`scard`判断；
+- 如果是sorted set结构，通过`zcard`判断。
+
+> 正因为这样的判断方式，虽然string结构肯定可以正确的筛选出最占用缓存，也可以说最大的key。但是list不一定，例如，现在有两个list类型的key，分别是：numberlist--[0,1,2]，stringlist--["123456789123456789"]，由于通过llen判断，所以numberlist要大于stringlist。而事实上stringlist更占用内存。其他三种数据结构hash，set，sorted set都会存在这个问题。使用bigkeys一定要注意这一点。
+
+### monitor
+
+假设生产环境没有屏蔽keys等一些高危命令，并且slowlog中还不断有新的keys导致慢日志。那我们如何揪出这些命令是由谁执行的呢？这就是`monitor`的用处，用法如下：
+
+```undefined
+redis-cli -p 6380 monitor
+```
+
+如果当前redis环境OPS比较高，那么建议结合linux管道命令优化，只输出keys命令的执行情况：
+
+```csharp
+[afei@redis ~]# redis-cli -p 6380 monitor | grep keys 
+1532645266.656525 [0 10.0.0.1:43544] "keyss" "*"
+1532645287.257657 [0 10.0.0.1:43544] "keyss" "44*"
+```
+
+执行结果中很清楚的看到keys命名执行来源。通过输出的IP和端口信息，就能在目标服务器上找到执行这条命令的进程，揪出元凶，勒令整改。
+
+### info
+
+如果说哪个命令能最全面反映当前redis运行情况，那么非info莫属。用法如下：
+
+```css
+INFO [section]
+```
+
+section可选值有：
+
+-  **Server**：运行的redis实例一些信息，包括：redis版本，操作系统信息，端口，GCC版本，配置文件路径等；
+-  **Clients**：redis客户端信息，包括：已连接客户端数量，阻塞客户端数量等；
+-  **Memory**：使用内存，峰值内存，内存碎片率，内存分配方式。这几个参数都非常重要；
+-  **Persistence**：AOF和RDB持久化信息；
+-  **Stats**：一些统计信息，最重要三个参数：OPS(`instantaneous_ops_per_sec`)，`keyspace_hits`和`keyspace_misses`两个参数反应缓存命中率；
+-  **Replication**：redis集群信息；
+-  **CPU**：CPU相关信息；
+-  **Keyspace**：redis中各个DB里key的信息；
+
+### config
+
+config是一个非常有价值的命令，主要体现在对redis的运维。因为生产环境一般是不允许随意重启的，不能因为需要调优一些参数就修改conf配置文件并重启。redis作者早就想到了这一点，通过config命令能热修改一些配置，不需要重启redis实例，可以通过如下命令查看哪些参数可以热修改：
+
+```csharp
+config get *
+```
+
+热修改就比较容易了，执行如下命令即可：
+
+```bash
+config set 
+```
+
+例如：`config set slowlog-max-len 100`，`config set maxclients 1024`
+
+这样修改的话，如果以后由于某些原因redis实例故障需要重启，那通过config热修改的参数就会被配置文件中的参数覆盖，所以我们需要通过一个命令将config热修改的参数刷到redis配置文件中持久化，通过执行如下命令即可：
+
+```undefined
+config rewrite
+```
+
+执行该命令后，我们能在config文件中看到类似这种信息：
+
+```kotlin
+# 如果conf中本来就有这个参数，通过执行config set，那么redis直接原地修改配置文件
+maxclients 1024
+# 如果conf中没有这个参数，通过执行config set，那么redis会追加在Generated by CONFIG REWRITE字样后面
+# Generated by CONFIG REWRITE
+save 600 60
+slowlog-max-len 100
+```
+
+### set
+
+set命令也能提升逼格？是的，我本不打算写这个命令，但是我见过太多人没有完全掌握这个命令，官方文档介绍的用法如下：
+
+```css
+SET key value [EX seconds] [PX milliseconds] [NX|XX]
+```
+
+你可能用的比较多的就是`set key value`，或者`SETEX key seconds value`，所以很多同学用redis实现分布式锁分为两步：首先执行`SETNX key value`，然后执行`EXPIRE key seconds`。很明显，这种实现有很严重的问题，因为两步执行不具备原子性，如果执行第一个命令后出现某些未知异常导致无法执行`EXPIRE key seconds`，那么分布式锁就会一直无法得到释放。
+
+通过`SET`命令实现分布式锁的正式姿势应该是`SET key value EX seconds NX`（EX和PX任选，取决于对过期时间精度要求）。另外，value也有要求，最好是一个类似UUID这种具备唯一性的字符串。当然如果问你redis是否还有其他实现分布式锁的方案。你能说出redlock，那对方一定眼前一亮，心里对你竖起大拇指，但嘴上不会说。
 
 
 
