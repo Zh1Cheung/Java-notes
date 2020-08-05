@@ -33,7 +33,7 @@
 
   - 非核心线程的回收周期（线程生命周期终结时刻）是keepAliveTime，线程生命周期终结的条件是：下一次通过任务队列获取任务的时候并且存活时间超过keepAliveTime。
 
-- 工作队列
+- 工作队列（具体见JUC工具类）
 
   - ArrayBlockingQueue
 
