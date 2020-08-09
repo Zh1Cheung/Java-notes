@@ -93,21 +93,36 @@
 
 ## Bean的生命周期
 
+- ```
+  * bean的生命周期：
+  *     bean创建---初始化----销毁的过程
+  * 容器管理bean的生命周期；
+  * 我们可以自定义初始化和销毁方法；容器在bean进行到当前生命周期的时候来调用我们自定义的初始化和销毁方法
+  ```
+
 - 调用postProcessBeanFactory()方法
+
 - 实例化bean对象
   - 实例化Bean之前调用postProcessBeforeInstantiation()方法
   - 实例化Bean之后调用该接口的postProcessAfterInstantiation()方法
   - 声明，只生成对象不赋值的过程。
     初始化，是给对象赋值的过程。
     实例化，是使用new为对象分配内存的过程。
+  
 - 设置对象属性
+
 - 如果Bean实现了BeanNameAware，工厂调用Bean的setBeanName()方法传递Bean的ID
+
 - 如果Bean实现了BeanFactoryAware，工厂调用setBeanFactory()方法传入工厂自身
+
 - 如果Bean实现了ApplicationContextAware，调用接口的setApplicationContext()方法，将ApplicationContext实例设置到Bean中
+
 - 如果实现了 InitializingBean 接口，则会调用 afterPropertiesSet 方法
+
 - 调用Bean的初始化方法   init-method属性
   - 调用Bean的初始化方法之前  将Bean实例传递给Bean的前置处理器的postProcessBeforeInitialization
   - 调用Bean的初始化方法之后  将Bean实例传递给Bean的后置处理器的postProcessAfterInitialization
+  
 - 使用Bean容器关闭之前，调用Bean的销毁方法
 
 

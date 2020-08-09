@@ -491,6 +491,14 @@
   > This is my dog, my dog's name is frank
   >
   > This is my fish, my fish's name is george
+  >
+  > 
+  >
+  > 匹配正确的ip地址
+  >
+  > ```shell
+  > sed -n -r   "/((([0-9]{1,2})|(1[0-9]{2})|(2[0-4][0-9])|(25[0-5]))\.){3}/p" test_1 | awk -F "." '{if($4<255) print $0}'
+  > ```
 
 ### awk
 
@@ -671,6 +679,14 @@
   > mysql, 99928KB 
   >
   > www, 3264924KB 
+  
+- 日志文件中访问量最大的top10 IP地址
+
+  - > cat  test.log|awk -F" " '{print $2}'|sort|uniq -c|sort -nrk 1 -t' '|awk -F" " '{print $2}'|head -10
+    >
+    > sort|uniq -c   //统计重复的行数
+    >
+    > sort -n是按照数值进行由小到大进行排序， -r是表示逆序，-t是指定分割符，-k是执行按照第几列进行排序
 
 #### awk脚本
 
