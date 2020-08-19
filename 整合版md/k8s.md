@@ -510,7 +510,7 @@ Kubernetes版本表示为xyz，其中x是主要版本，y是次要版本，z是�
 
 - kubeadm 目前最欠缺的是，一键部署一个高可用的 Kubernetes 集群，即：Etcd、Master 组件都应该是多节点集群，而不是现在这样的单点。这，当然也正是 kubeadm 接下来发展的主要方向。
 
-
+- 在 Bare-metal 环境下使用 kubeadm 工具部署了一个完整的Kubernetes 集群：这个集群有一个 Master 节点和多个 Worker 节点；使用 Weave 作为容器网络插件；使用 Rook 作为容器持久化存储插件；使用 Dashboard 插件提供了可视化的 Web 界面。
 
 
 
@@ -810,7 +810,32 @@ Kubernetes版本表示为xyz，其中x是主要版本，y是次要版本，z是�
 
 ## “控制器”模型
 
+- ```
+  apiVersion: apps/v1 
+  kind: Deployment 
+  metadata: 
+  	name: nginx-deployment 
+  spec: 
+  	selector: 
+  		matchLabels: 
+  			app: nginx 
+  	replicas: 2 
+  	template: 
+  		metadata: 
+  			labels: 
+  				app: nginx 
+  		spec: 
+  			containers: 
+  			- name: nginx 
+  				image: nginx:1.7.9 
+  				ports: 
+  				- containerPort: 80
+  ```
+  
+  
+  
 - **kube-controller-manager 的组件**
+  
   - 实际上，这个组件，就是一系列控制器的集合
   - 这些控制器之所以被统一放在 pkg/controller 目录下，就是因为它们都遵循 Kubernetes项目中的一个通用编排模式，即：控制循环（control loop）。
     - 在具体实现中，实际状态往往来自于 Kubernetes 集群本身。
@@ -818,6 +843,7 @@ Kubernetes版本表示为xyz，其中x是主要版本，y是次要版本，z是�
     - Deployment 控制器将两个状态做比较，然后根据比较结果，确定是创建 Pod，还是删除已有的 Pod
       - 被控制对象的定义，则来自于一个“模板”。比如，Deployment 里的 template 字段。
       - 所有被这个 Deployment 管理的 Pod 实例，其实都是根据这个 template 字段的内容创建出来的。
+  
 - “控制器模式”（controller pattern）的设计方法，来统一地实现对各种不同的对象或者资源进行的编排操作。
   - 在后面的讲解中，很多不同类型的容器编排功能，比如 StatefulSet、DaemonSet 等等，它们无一例外地都有这样一个甚至多个控制器的存在，并遵循控制循环（control loop）的流程，完成各自的编排逻辑。
   - 跟 Deployment 相似，这些控制循环最后的执行结果，要么就是创建、更新一些 Pod（或者其他的 API 对象、资源），要么就是删除一些已经存在的 Pod（或者其他的 API 对象、资源）。
@@ -876,7 +902,7 @@ Kubernetes版本表示为xyz，其中x是主要版本，y是次要版本，z是�
     - 应用的多个实例分别绑定了不同的存储数据。对于这些应用实例来说，Pod A 第一次读取到的数据，和隔了十分钟之后再次读取到的数据，应该是同一份，哪怕在此期间 Pod A 被重新创建过。这种情况最典型的例子，就是一个数据库应用的多个存储实例。
   - StatefulSet 的核心功能，就是通过某种方式记录这些状态，然后在 Pod 被重新创建时，能够为新 Pod 恢复这些状态。
 
-- Headless Service
+- **Headless Service**
 
   - Service 是 Kubernetes 项目中用来将一组 Pod 暴露给外界访问的一种机制。
   - 第一种方式，是以 Service 的 VIP（Virtual IP，即：虚拟 IP）方式。
@@ -894,6 +920,12 @@ Kubernetes版本表示为xyz，其中x是主要版本，y是次要版本，z是�
   - 而它所代理的 Pod，依然是采用 Label Selector 机制选择出来的
 
   - ```yaml
+    apiVersion: v1 
+    kind: Service 
+    metadata: 
+    	name: nginx 
+    	labels: 
+    		app: nginx
     spec:
      ports:
       - port: 80c
@@ -905,7 +937,34 @@ Kubernetes版本表示为xyz，其中x是主要版本，y是次要版本，z是�
 
 - StatefulSet 又是如何使用这个 DNS 记录来维持 Pod 的拓扑状态的呢？
 
+  - ```
+    apiVersion: apps/v1 
+    kind: StatefulSet 
+    metadata: 
+    	name: web 
+    spec: 
+    	serviceName: "nginx" 
+    	replicas: 2 
+    	selector: 
+    		matchLabels: 
+    			app: nginx 
+    	template: 
+    		metadata: 
+    			labels:
+    				app: nginx 
+    		spec: 
+    			containers: 
+    			- name: nginx 
+    			image: nginx:1.9.1 
+    			ports: 
+    			- containerPort: 80 
+    				name: web
+    ```
+
+    
+
   - serviceName=nginx 字段告诉 StatefulSet 控制器，在执行控制循环（Control Loop）的时候，请使用 nginx 这个 Headless Service 来保证 Pod 的“可解析身份”。
+
   - StatefulSet 给它所管理的所有 Pod 的名字，进行了编号，编号规则是：-
 
 - StatefulSet 这个控制器的主要作用之一，就是使用 Pod 模板创建 Pod 的时候，对它们进行编号，并且按照编号顺序逐一完成创建工作。
@@ -925,10 +984,48 @@ Kubernetes版本表示为xyz，其中x是主要版本，y是次要版本，z是�
 - Kubernetes 项目引入了一组叫作 Persistent VolumeClaim（PVC）和 Persistent Volume（PV）的 API 对象，大大降低了用户声明和使用持久化Volume 的门槛。
 - PVC
   - 第一步：定义一个 PVC，声明想要的 Volume 的属性：
+    
     - storage: 1Gi，表示我想要的 Volume 大小至少是 1 GB；accessModes:ReadWriteOnce，表示这个 Volume 的挂载方式是可读写，并且只能被挂载在一个节点上而非被多个节点共享。
+    
+    - ```
+      kind: PersistentVolumeClaim 
+      apiVersion: v1 
+      metadata: 
+      	name: pv-claim 
+      spec: 
+      	accessModes: 
+      	- ReadWriteOnce 
+      	resources: 
+      		requests: 
+      			storage: 1Gi
+      ```
+    
   - 第二步：在应用的 Pod 中，声明使用这个 PVC：
     - 在这个 Pod 的 Volumes 定义中，我们只需要声明它的类型是persistentVolumeClaim，然后指定 PVC 的名字，而完全不必关心 Volume 本身的定义。
+    
     - 只要我们创建这个 PVC 对象，Kubernetes 就会自动为它绑定一个符合条件的Volume。可是，这些符合条件的 Volume 来自于由运维人员维护的 PV（Persistent Volume）对象。
+    
+    - ```
+      apiVersion: v1 
+      kind: Pod 
+      metadata: 
+      	name: pv-pod 
+      spec:
+      	containers: 
+      		- name: pv-container 
+      			image: nginx 
+      			ports: 
+      				- containerPort: 80 
+      					name: "http-server" 
+      			volumeMounts: - mountPath: "/usr/share/nginx/html" 
+      										name: pv-storage 
+      volumes: 
+      	- name: pv-storage 
+      		persistentVolumeClaim: 
+      			claimName: pv-claim
+      ```
+    
+  
 - 而 PVC、PV 的设计，也使得 StatefulSet 对存储状态的管理成为了可能
   - 为这个 StatefulSet 额外添加了一个 volumeClaimTemplates 字段。
     - 也就是说，凡是被这个 StatefulSet 管理的 Pod，都会声明一个对应的 PVC；而这个 PVC 的定义，就来自于volumeClaimTemplates 这个模板字段。更重要的是，这个 PVC 的名字，会被分配一个与这个Pod 完全一致的编号。
@@ -995,6 +1092,161 @@ Kubernetes版本表示为xyz，其中x是主要版本，y是次要版本，z是�
   - 只不过，在创建每个 Pod 的时候，DaemonSet 会自动给这个 Pod 加上一个 nodeAffinity，从而保证这个 Pod 只会在指定节点上启动。同时，它还会自动给这个 Pod 加上一个Toleration，从而忽略节点的 unschedulable“污点”。
   - 也可以在 Pod 模板里加上更多种类的 Toleration，从而利用 DaemonSet 实现自己的目的。
   - 相比于 Deployment，DaemonSet 只管理 Pod 对象，然后通过 nodeAffinity 和 Toleration这两个调度器的小功能，保证了每个节点上有且只有一个 Pod
+
+
+
+## Operator工作原理
+
+- 在 Kubernetes 生态中，还有一个相对更加灵活和编程友好的管理“有状态应用”的解决方案，它就是：Operator。
+
+- 以 Etcd Operator 为例，来为你讲解一下 Operator 的工作原理和编写方法
+
+  - 第一步，将这个 Operator 的代码 Clone 到本地：
+  - 第二步，将这个 Etcd Operator 部署在 Kubernetes 集群里
+
+- 在部署 Etcd Operator 的 Pod 之前，你需要先执行这样一个脚本
+
+  - $ example/rbac/create_role.sh
+
+  - 这个脚本的作用，就是为 Etcd Operator 创建 RBAC 规则。这是因
+
+    为，Etcd Operator 需要访问 Kubernetes 的 APIServer 来创建对象。
+
+  - 更具体地说，上述脚本为 Etcd Operator 定义了如下所示的权限：
+
+    1. 对 Pod、Service、PVC、Deployment、Secret 等 API 对象，有所有权限；
+
+    2. 对 CRD 对象，有所有权限；
+
+    3. 对属于 etcd.database.coreos.com 这个 API Group 的 CR（Custom Resource）对象，有所有权限。
+
+- Etcd Operator 本身，其实就是一个 Deployment
+
+  - 一旦 Etcd Operator 的 Pod 进入了 Running 状态，你就会发现，有一个 CRD 被自动创建了出来
+  - 这个 CRD 名叫etcdclusters.etcd.database.coreos.com 。你可以通过 kubectldescribe 命令看到它的细节
+  - 这个 CRD 相当于告诉了 Kubernetes：接下来，如果有 API 组（Group）是etcd.database.coreos.com、API 资源类型（Kind）是“EtcdCluster”的 YAML 文件被提交上来，你可一定要认识啊
+
+- 通过上述两步操作，你实际上是在 Kubernetes 里添加了一个名叫 EtcdCluster 的自定义资源类型。而 Etcd Operator 本身，就是这个自定义资源类型对应的自定义控制器
+
+- 当 Etcd Operator 部署好之后，接下来在这个 Kubernetes 里创建一个 Etcd 集群的工作就非常简单了。你只需要编写一个 EtcdCluster 的 YAML 文件，然后把它提交给 Kubernetes 即可
+
+  - 这个 example-etcd-cluster.yaml 文件里描述的，是一个 3 个节点的 Etcd 集群。我们可以看到它被提交给 Kubernetes 之后，就会有三个 Etcd 的 Pod 运行起来
+
+- 从这个 example-etcd-cluster.yaml 文件开始说起
+
+  - 这个文件里定义的，正是 EtcdCluster 这个 CRD 的一个具体实例，也就是一个Custom Resource（CR）。而它的内容非常简单
+  - EtcdCluster 的 spec 字段非常简单。其中，size=3 指定了它所描述的 Etcd 集群的节点个数。而 version=“3.2.13”，则指定了 Etcd 的版本，仅此而已。
+  - **而真正把这样一个 Etcd 集群创建出来的逻辑，就是 Etcd Operator 要实现的主要工作了。**
+
+- Operator 的工作原理，实际上是利用了 Kubernetes 的自定义 API 资源（CRD），来描述我们想要部署的“有状态应用”；然后在自定义控制器里，根据自定义 API 对象的变化，来完成具体的部署和运维工作。
+
+- Etcd Operator 部署 Etcd 集群，采用的是静态集群（Static）的方式。
+
+  - 静态集群的好处是，它不必依赖于一个额外的服务发现机制来组建集群，非常适合本地容器化部署。而它的难点，则在于你必须在部署的时候，就规划好这个集群的拓扑结构，并且能够知道这些节点固定的 IP 地址。
+
+  - ```
+    $ etcd --name infra0 --initial-advertise-peer-urls http://10.0.1.10:2380 \
+     --listen-peer-urls http://10.0.1.10:2380 \
+    ...
+     --initial-cluster-token etcd-cluster-1 \
+     --initial-cluster infra0=http://10.0.1.10:2380,infra1=http://10.0.1.11:2380,infra2=http://10.0
+     --initial-cluster-state new
+     
+     10.0.1.10 11 12 启三个
+    ```
+
+  - 启动了三个 Etcd 进程，组成了一个三节点的 Etcd 集群
+
+  - 这些节点启动参数里的–initial-cluster 参数，非常值得你关注。它的含义，正是当前节点启动时集群的拓扑结构。说得更详细一点，就是当前这个节点启动时，需要跟哪些节点通信来组成集群。
+
+    - 可以看到，–initial-cluster 参数是由“< 节点名字 >=< 节点地址 >”格式组成的一个数组。而上面这个配置的意思就是，当 infra2 节点启动之后，这个 Etcd 集群里就会有 infra0、infra1和 infra2 三个节点。
+    - 同时，这些 Etcd 节点，需要通过 2380 端口进行通信以便组成集群，这也正是上述配置中–listen-peer-urls 字段的含义。
+    - 此外，一个 Etcd 集群还需要用–initial-cluster-token 字段，来声明一个该集群独一无二的Token 名字。
+
+  - 而我们要编写的 Etcd Operator，就是要把上述过程自动化。这其实等同于：用代码来生成每个Etcd 节点 Pod 的启动命令，然后把它们启动起来
+
+- 当然，在编写自定义控制器之前，我们首先需要完成 EtcdCluster 这个 CRD 的定义，它对应的types.go 文件的主要内容
+
+  - 只关注 Size（即：Etcd 集群的大小）字段即可。
+  - Size 字段的存在，就意味着将来如果我们想要调整集群大小的话，应该直接修改 YAML 文件里size 的值，并执行 kubectl apply -f。
+  - 这样，Operator 就会帮我们完成 Etcd 节点的增删操作。这种“scale”能力，也是 EtcdOperator 自动化运维 Etcd 集群需要实现的主要功能
+  - 而为了能够支持这个功能，我们就不再像前面那样在–initial-cluster 参数里把拓扑结构固定死。
+
+- 所以，Etcd Operator 的实现，虽然选择的也是静态集群，但这个集群具体的组建过程，是逐个节点动态添加的方式
+
+  - 首先，Etcd Operator 会创建一个“种子节点”；
+  - 然后，Etcd Operator 会不断创建新的 Etcd 节点，然后将它们逐一加入到这个集群当中，直到集群的节点数等于 size。
+  - 而这两种节点的不同之处，就在于一个名叫–initial-cluster-state 的启动参数：
+    - 当这个参数值设为 new 时，就代表了该节点是种子节点。而我们前面提到过，种子节点还必须通过–initial-cluster-token 声明一个独一无二的 Token。
+    - 而如果这个参数值设为 existing，那就是说明这个节点是一个普通节点，Etcd Operator 需要把它加入到已有集群里。
+
+- 那么接下来的问题就是，每个 Etcd 节点的–initial-cluster 字段的值又是怎么生成的呢？
+
+  - 由于这个方案要求种子节点先启动，所以对于种子节点 infra0 来说，它启动后的集群只有它自己，即：–initial-cluster=infra0=http://10.0.1.10:2380。
+  - 而对于接下来要加入的节点，比如 infra1 来说，它启动后的集群就有两个节点了，所以它的–initial-cluster 参数的值应该是：infra0=http://10.0.1.10:2380,infra1=http://10.0.1.11:2380。
+  - 其他节点，都以此类推。
+
+- 现在，你就应该能在脑海中构思出上述三节点 Etcd 集群的部署过程了
+
+  - 首先，只要用户提交 YAML 文件时声明创建一个 EtcdCluster 对象（一个 Etcd 集群），那么Etcd Operator 都应该先创建一个单节点的种子集群（Seed Member），并启动这个种子节点。
+
+  - 接下来，对于其他每一个节点，Operator 只需要执行如下两个操作即可，以 infra1 为例
+
+    - 第一步：通过 Etcd 命令行添加一个新成员：
+
+      - $ etcdctl member add infra1 http://10.0.1.11:2380
+
+    - 第二步：为这个成员节点生成对应的启动参数，并启动它：
+
+      - ```
+        $ etcd
+         --data-dir=/var/etcd/data
+         --name=infra1
+         --initial-advertise-peer-urls=http://10.0.1.11:2380
+         --listen-peer-urls=http://0.0.0.0:2380
+         --listen-client-urls=http://0.0.0.0:2379
+         --advertise-client-urls=http://10.0.1.11:2379
+         --initial-cluster=infra0=http://10.0.1.10:2380,infra1=http://10.0.1.11:2380
+         --initial-cluster-state=existing
+        ```
+
+    - 可以看到，对于这个 infra1 成员节点来说，它的 initial-cluster-state 是 existing，也就是要加入已有集群。而它的 initial-cluster 的值，则变成了 infra0 和 infra1 两个节点的 IP 地址。
+
+    - 所以，以此类推，不断地将 infra2 等后续成员添加到集群中，直到整个集群的节点数目等于用户指定的 size 之后，部署就完成了。
+
+- Etcd Operator 的工作原理
+
+  - 跟所有的自定义控制器一样，Etcd Operator 的启动流程也是围绕着 Informer 展开的
+  - Etcd Operator 启动要做的第一件事（ c.initResource），是创建 EtcdCluster 对象所需要的 CRD，即：前面提到的etcdclusters.etcd.database.coreos.com。这样Kubernetes 就能够“认识”EtcdCluster 这个自定义 API 资源了。
+  - 而接下来，Etcd Operator 会定义一个 EtcdCluster 对象的 Informer。
+  - 具体来讲，我们在控制循环里执行的业务逻辑，往往是比较耗时间的。比如，创建一个真实的Etcd 集群。而 Informer 的 WATCH 机制对 API 对象变化的响应，则非常迅速。所以，控制器里的业务逻辑就很可能会拖慢 Informer 的执行周期，甚至可能 Block 它。而要协调这样两个快、慢任务的一个典型解决方法，就是引入一个工作队列。
+  - 由于 Etcd Operator 里没有工作队列，那么在它的 EventHandler 部分，就不会有什么入队操作，而直接就是每种事件对应的具体的业务逻辑了。
+  - 不过，Etcd Operator 在业务逻辑的实现方式上，与常规的自定义控制器略有不同。
+    - Etcd Operator 的特殊之处在于，它为每一个 EtcdCluster 对象，都启动了一个控制循环，“并发”地响应这些对象的变化。显然，这种做法不仅可以简化 Etcd Operator 的代码实现，还有助于提高它的响应速度。
+
+- 以文章一开始的 example-etcd-cluster 的 YAML 文件为例。
+
+  - 当这个 YAML 文件第一次被提交到 Kubernetes 之后，Etcd Operator 的 Informer，就会立刻“感知”到一个新的 EtcdCluster 对象被创建了出来。所以，EventHandler 里的“添加”事件会被触发。
+  - 而这个 Handler 要做的操作也很简单，即：在 Etcd Operator 内部创建一个对应的 Cluster 对象（cluster.New）
+    - 这个 Cluster 对象，就是一个 Etcd 集群在 Operator 内部的描述，所以它与真实的 Etcd 集群的生命周期是一致的。
+  - 而一个 Cluster 对象需要具体负责的，其实有两个工作。
+    - 其中，第一个工作只在该 Cluster 对象第一次被创建的时候才会执行。这个工作，就是我们前面提到过的 Bootstrap，即：创建一个单节点的种子集群。
+      - 由于种子集群只有一个节点，所以这一步直接就会生成一个 Etcd 的 Pod 对象。这个 Pod 里有一个 InitContainer，负责检查 Pod 的 DNS 记录是否正常。如果检查通过，用户容器也就是Etcd 容器就会启动起来。
+    - Cluster 对象的第二个工作，则是启动该集群所对应的控制循环。
+      - 首先，控制循环要获取到所有正在运行的、属于这个 Cluster 的 Pod 数量，也就是该 Etcd 集群的“实际状态”。
+      - 而这个 Etcd 集群的“期望状态”，正是用户在 EtcdCluster 对象里定义的 size。所以接下来，控制循环会对比这两个状态的差异。
+
+- 第一个问题是，在 StatefulSet 里，它为 Pod 创建的名字是带编号的，这样就把整个集群的拓扑状态固定了下来（比如：一个三节点的集群一定是由名叫 web-0、web-1 和 web-2 的三个Pod 组成）。可是，在 Etcd Operator 里，为什么我们使用随机名字就可以了呢？
+
+  - 这是因为，Etcd Operator 在每次添加 Etcd 节点的时候，都会先执行 etcdctl member add<Pod 名字 >；每次删除节点的时候，则会执行 etcdctl member remove <Pod 名字 >。这些操作，其实就会更新 Etcd 内部维护的拓扑信息，所以 Etcd Operator 无需在集群外部通过编号来固定这个拓扑关系。
+
+- 第二个问题是，为什么我没有在 EtcdCluster 对象里声明 Persistent Volume？难道，我们不担心节点宕机之后 Etcd 的数据会丢失吗？
+
+  - 我们知道，Etcd 是一个基于 Raft 协议实现的高可用 Key-Value 存储。根据 Raft 协议的设计原则，当 Etcd 集群里只有半数以下（在我们的例子里，小于等于一个）的节点失效时，当前集群依然可以正常工作。此时，Etcd Operator 只需要通过控制循环创建出新的 Pod，然后将它们加入到现有
+  - 但是，当这个 Etcd 集群里有半数以上（在我们的例子里，大于等于两个）的节点失效的时候，这个集群就会丧失数据写入的能力，从而进入“不可用”状态。此时，即使 Etcd Operator 创建出新的 Pod 出来，Etcd 集群本身也无法自动恢复起来。
+  - 这个时候，我们就必须使用 Etcd 本身的备份数据来对集群进行恢复操作。在有了 Operator 机制之后，上述 Etcd 的备份操作，是由一个单独的 Etcd Backup Operator负责完成的。
+
+
 
 
 
@@ -1105,6 +1357,80 @@ Kubernetes版本表示为xyz，其中x是主要版本，y是次要版本，z是�
 
   - 接下来的另一半工作是：为这个 API 对象编写一个自定义控制器（Custom Controller）。这样， Kubernetes 才能根据 Network API 对象的“增、删、改”操作，在真实环境中做出相应的响应。比如，“创建、删除、修改”真正的 Neutron 网络。
   - 而这，正是 Network 这个 API 对象所关注的“业务逻辑”。
+
+
+
+## 编写自定义控制器
+
+- 为 Network 这个自定义API 对象编写一个自定义控制器
+- 总得来说，编写自定义控制器代码的过程包括：编写 main 函数、编写自定义控制器的定义，以及编写控制器里的业务逻辑三个部分。
+  - 这个 main 函数主要通过三步完成了初始化并启动一个自定义控制器的工作。
+  - 第一步：main 函数根据我提供的 Master 配置（APIServer 的地址端口和 kubeconfig 的路径），创建一个 Kubernetes 的 client（kubeClient）和 Network 对象的client（networkClient）。
+  - 但是，如果我没有提供 Master 配置呢？
+  - 这时，main 函数会直接使用一种名叫InClusterConfig的方式来创建这个 client。这个方式，会假设你的自定义控制器是以 Pod 的方式运行在 Kubernetes 集群里的。
+  - 第二步：main 函数为 Network 对象创建一个叫作 InformerFactory（即：networkInformerFactory）的工厂，并使用它生成一个 Network 对象的 Informer，传递给控制器。
+  - 第三步：main 函数启动上述的 Informer，然后执行 controller.Run，启动自定义控制器。
+- 自定义控制器的工作原理。
+  - 这个控制器要做的第一件事，是从 Kubernetes 的 APIServer 里获取它所关心的对象，也就是我定义的 Network 对象。
+  - 这个操作，依靠的是一个叫作 Informer（可以翻译为：通知器）的代码库完成的。Informer 与API 对象是一一对应的，所以我传递给自定义控制器的，正是一个 Network 对象的Informer（Network Informer）
+  - 我在创建这个 Informer 工厂的时候，需要给它传递一个networkClient。
+    - 事实上，Network Informer 正是使用这个 networkClient，跟 APIServer 建立了连接。不过，真正负责维护这个连接的，则是 Informer 所使用的 Reflector 包。
+    - 更具体地说，Reflector 使用的是一种叫作ListAndWatch的方法，来“获取”并“监听”这些Network 对象实例的变化。
+    - 在 ListAndWatch 机制下，一旦 APIServer 端有新的 Network 实例被创建、删除或者更新，Reflector 都会收到“事件通知”。这时，该事件及它对应的 API 对象这个组合，就被称为增量（Delta），它会被放进一个 Delta FIFO Queue（即：增量先进先出队列）中。
+    - 而另一方面，Informe 会不断地从这个 Delta FIFO Queue 里读取（Pop）增量。每拿到一个增量，Informer 就会判断这个增量里的事件类型，然后创建或者更新本地对象的缓存。这个缓存，在 Kubernetes 里一般被叫作 Store。
+    - 比如，如果事件类型是 Added（添加对象），那么 Informer 就会通过一个叫作 Indexer 的库把这个增量里的 API 对象保存在本地缓存中，并为它创建索引。相反地，如果增量的事件类型是 Deleted（删除对象），那么 Informer 就会从本地缓存中删除这个对象。
+  - 这个同步本地缓存的工作，是 Informer 的第一个职责，也是它最重要的职责。
+  - 而Informer 的第二个职责，则是根据这些事件的类型，触发事先注册好的ResourceEventHandler。这些 Handler，需要在创建控制器的时候注册给它对应的Informer。
+  - 编写这个控制器的定义的主要内容
+    - 我前面在 main 函数里创建了两个 client（kubeclientset 和 networkclientset），然后在这段代码里，使用这两个 client 和前面创建的 Informer，初始化了自定义控制器。
+    - 然后，我为 networkInformer 注册了三个 Handler（AddFunc、UpdateFunc 和DeleteFunc），分别对应 API 对象的“添加”“更新”和“删除”事件。而具体的处理操作，都是将该事件对应的 API 对象加入到工作队列中。
+  - 需要注意的是，实际入队的并不是 API 对象本身，而是它们的 Key，即：该 API 对象的/。
+  - 而我们后面即将编写的控制循环，则会不断地从这个工作队列里拿到这些 Key，然后开始执行真正的控制逻辑。
+  - 综合上面的讲述，你现在应该就能明白，**所谓 Informer，其实就是一个带有本地缓存和索引机制的、可以注册 EventHandler 的 client。它是自定义控制器跟 APIServer 进行数据同步的重要组件**。
+    - 更具体地说，Informer 通过一种叫作 ListAndWatch 的方法，把 APIServer 中的 API 对象缓存在了本地，并负责更新和维护这个缓存。
+    - 其中，ListAndWatch 方法的含义是：首先，通过 APIServer 的 LIST API“获取”所有最新版本的 API 对象；然后，再通过 WATCH API 来“监听”所有这些 API 对象的变化。
+    - 而通过监听到的事件变化，Informer 就可以实时地更新本地缓存，并且调用这些事件对应的EventHandler 了。
+    - 此外，在这个过程中，每经过 resyncPeriod 指定的时间，Informer 维护的本地缓存，都会使用最近一次 LIST 返回的结果强制更新一次，从而保证缓存的有效性。在 Kubernetes 中，这个缓存强制更新的操作就叫作：resync。
+    - 需要注意的是，这个定时 resync 操作，也会触发 Informer 注册的“更新”事件。但此时，这个“更新”事件对应的 Network 对象实际上并没有发生变化，即：新、旧两个 Network 对象的 ResourceVersion 是一样的。在这种情况下，Informer 就不需要对这个更新事件再做进一步的处理了。
+- 控制循环（Control Loop）部分
+  - 可以看到，启动控制循环的逻辑非常简单：
+    - 首先，等待 Informer 完成一次本地缓存的数据同步操作；
+    - 然后，直接通过 goroutine 启动一个（或者并发启动多个）“无限循环”的任务。
+  - 而这个“无限循环”任务的每一个循环周期，执行的正是我们真正关心的业务逻辑。
+- 编写这个自定义控制器的业务逻辑
+  - 在这个执行周期里（processNextWorkItem），我们首先从工作队列里出队（workqueue.Get）了一个成员，也就是一个 Key（Network 对象的：namespace/name）。
+  - 然后，在 syncHandler 方法中，我使用这个 Key，尝试从 Informer 维护的缓存中拿到了它所对应的 Network 对象。
+  - 可以看到，在这里，我使用了 networksLister 来尝试获取这个 Key 对应的 Network 对象。这个操作，其实就是在访问本地缓存的索引。实际上，在 Kubernetes 的源码中，你会经常看到控制器从各种 Lister 里获取对象，比如：podLister、nodeLister 等等，它们使用的都是Informer 和缓存机制。
+  - 而如果控制循环从缓存中拿不到这个对象（即：networkLister 返回了 IsNotFound 错误），那就意味着这个 Network 对象的 Key 是通过前面的“删除”事件添加进工作队列的。所以，尽管队列里有这个 Key，但是对应的 Network 对象已经被删除了。
+  - 这时候，我就需要调用 Neutron 的 API，把这个 Key 对应的 Neutron 网络从真实的集群里删除掉。
+  - 而如果能够获取到对应的 Network 对象，我就可以执行控制器模式里的对比“期望状态”和“实际状态”的逻辑了。
+  - 其中，自定义控制器“千辛万苦”拿到的这个 Network 对象，正是 APIServer 里保存的“期望状态”，即：用户通过 YAML 文件提交到 APIServer 里的信息。当然，在我们的例子里，它已经被 Informer 缓存在了本地。
+- “实际状态”又从哪里来呢？
+  - 当然是来自于实际的集群了。所以，我们的控制循环需要通过 Neutron API 来查询实际的网络情况。
+  - 比如，我可以先通过 Neutron 来查询这个 Network 对象对应的真实网络是否存在。
+    - 如果不存在，这就是一个典型的“期望状态”与“实际状态”不一致的情形。这时，我就需要使用这个 Network 对象里的信息（比如：CIDR 和 Gateway），调用 Neutron API 来创建真实的网络。
+    - 如果存在，那么，我就要读取这个真实网络的信息，判断它是否跟 Network 对象里的信息一致，从而决定我是否要通过 Neutron 来更新这个已经存在的真实网络。
+  - 这样，我就通过对比“期望状态”和“实际状态”的差异，完成了一次调协（Reconcile）的过程。
+- 把这个项目运行起来，查看一下它的工作情况
+  - 你可以自己编译这个项目，也可以直接使用我编译好的二进制文件（samplecrd-controller）。编译并启动这个项目的具体流程如下所示
+  - 接下来，我就可以进行 Network 对象的增删改查操作了。
+  - 首先，创建一个 Network 对象
+    - 可以看到，我们上面创建 example-network 的操作，触发了 EventHandler 的“添加”事件，从而被放进了工作队列。
+    - 紧接着，控制循环就从队列里拿到了这个对象，并且打印出了正在“处理”这个 Network 对象的日志。
+    - 可以看到，这个 Network 的 ResourceVersion，也就是 API 对象的版本号，是 479015，而它的 Spec 字段的内容，跟我提交的 YAML 文件一摸一样，比如，它的 CIDR 网段是：192.168.0.0/16。
+  - 我来修改一下这个 YAML 文件的内容
+    - 可以看到，这一次，Informer 注册的“更新”事件被触发，更新后的 Network 对象的 Key 被添加到了工作队列之中。
+    - 所以，接下来控制循环从工作队列里拿到的 Network 对象，与前一个对象是不同的：它的ResourceVersion 的值变成了 479062；而 Spec 里的字段，则变成了 192.168.1.0/16 网段
+- 实际上，这套流程不仅可以用在自定义 API 资源上，也完全可以用在 Kubernetes 原生的默认API 对象上。
+- Kubernetes API 编程范式的核心思想
+  - 所谓的 Informer，就是一个自带缓存和索引机制，可以触发 Handler 的客户端库。这个本地缓存在 Kubernetes 中一般被称为 Store，索引一般被称为 Index。
+  - Informer 使用了 Reflector 包，它是一个可以通过 ListAndWatch 机制获取并监视 API 对象变化的客户端封装。
+  - Reflector 和 Informer 之间，用到了一个“增量先进先出队列”进行协同。而 Informer 与你要编写的控制循环之间，则使用了一个工作队列来进行协同。
+  - 在实际应用中，除了控制循环之外的所有代码，实际上都是 Kubernetes 为你自动生成的，即：pkg/client/{informers, listers, clientset}里的内容。
+  - 而这些自动生成的代码，就为我们提供了一个可靠而高效地获取 API 对象“期望状态”的编程库。
+  - 所以，接下来，作为开发者，你就只需要关注如何拿到“实际状态”，然后如何拿它去跟“期望状态”做对比，从而决定接下来要做的业务逻辑即可。
+
+
 
 
 
@@ -1256,278 +1582,6 @@ Kubernetes版本表示为xyz，其中x是主要版本，y是次要版本，z是�
 
 - 以后凡是提到“Volume”，指的就是一个远程存储服务挂载在宿主机上的持久化目录；而“PV”，指的是这个 Volume 在Kubernetes 里的 API 对象。
 
-  
-
-## 容器网络
-
-- Linux 容器能看见的“网络栈”，实际上是被隔离在它自己的 Network Namespace 当中的。
-  - 所谓“网络栈”，就包括了：网卡（Network Interface）、回环设备（LoopbacDevice）、路由表（Routing Table）和 iptables 规则。对于一个进程来说，这些要素，其实就构成了它发起和响应网络请求的基本环境。
-  - 器要想跟外界进行通信，它发出的 IP 包就必须从它的 NetworNamespace 里出来，来到宿主机上。
-    - 解决这个问题的方法就是：为容器创建一个一端在容器里充当默认网卡、另一端在宿主机上的Veth Pair 设备。
-- 这个被隔离的容器进程，该如何跟其他 Network Namespace 里的容器进程进行交互呢？
-  - 如果你想要实现多台主机之间的通信，那就需要用网线，把它们连接在一台交换机上。在 Linux 中，能够起到虚拟交换机作用的网络设备，是网桥（Bridge）
-  - 为了实现上述目的，Docker 项目会默认在宿主机上创建一个名叫 docker0 的网桥，凡是连接在 docker0 网桥上的容器，就可以通过它来进行通信。
-- Veth Pair的虚拟设备
-  - 如何把这些容器“连接”到 docker0 网桥上
-  - 被创建出来后，总是以两张虚拟网卡（Veth Peer）的形式成对出现的。
-  - 从其中一个“网卡”发出的数据包，可以直接出现在与它对应的另一张“网卡”上，哪怕这两个“网卡”在不同的 Network Namespace 里。
-  - 因为这个容器里有一张叫作 eth0 的网卡，它正是一个 Veth Pair 设备在容器里的这一端，这个 Veth Pair 设备的另一端，则在宿主机上。所以同一宿主机上的两个容器默认就是相互连通
-  - 一旦一张虚拟网卡被“插”在网桥上，它就会变成该网桥的“从设备”。从设备会被“剥夺”调用网络协议栈处理数据包的资格，从而“降级”成为网桥上的一个端口
-- 如果我们通过软件的方式，创建一个整个集群“公用”的网桥，然后把集群里的所有容器都连接到这个网桥上，不就可以相互通信了吗？
-  - 构建这种容器网络的核心在于：我们需要在已有的宿主机网络上，再通过软件构建一个覆盖在已有宿主机网络之上的、可以把所有容器连通在一起的虚拟网络。所以，这种技术就被称为：Overlay Network（覆盖网络）。
-  - 这个 Overlay Network 本身，可以由每台宿主机上的一个“特殊网桥”共同组成
-
-
-
-
-
-
-
-## 容器跨主机网络
-
-- 要理解容器“跨主通信”的原理，就一定要先从 Flannel 这个项目说起。
-  - 事实上，Flannel 项目本身只是一个框架，真正为我们提供容器网络功能的，是 Flannel 的后端实现。
-  - 我们在进行系统级编程的时候，有一个非常重要的优化原则，就是要减少用户态到内核态的切换次数，并且把核心的处理逻辑都放在内核态进行。这也是为什么，Flannel 后来支持的VXLAN 模式，逐渐成为了主流的容器网络方案的原因。
-  - VXLAN，即 Virtual Extensible LAN（虚拟可扩展局域网），是 Linux 内核本身就支持的一种网络虚似化技术。所以说，VXLAN 可以完全在内核态实现上述封装和解封装的工作，从而通过与前面相似的“隧道”机制，构建出覆盖网络（Overlay Network）。
-- 设计思想
-  - 为了能够在二层网络上打通“隧道”，VXLAN 会在宿主机上设置一个特殊的网络设备作为“隧道”的两端。这个设备就叫作 VTEP(虚拟隧道端点)
-    - 这些 VTEP 设备之间，就需要想办法组成一个虚拟的二层网络，即：通过二层数据帧进行通信。
-    - “源 VTEP 设备”收到“原始 IP 包”后，就要想办法把“原始 IP 包”加上一个目的 MAC 地址，封装成一个二层数据帧，然后发送给“目的 VTEP 设备”
-      - Linux 内核还需要再把“内部数据帧”进一步封装成为宿主机网络里的一个普通的数据帧，好让它“载着”“内部数据帧”，通过宿主机的 eth0 网卡进行传输。
-      - 然后，Linux 内核会把这个数据帧封装进一个 UDP 包里发出去。
-    - 接下来的流程，就是一个正常的、宿主机网络上的封包工作。
-  - VXLAN 模式组建的覆盖网络，其实就是一个由不同宿主机上的 VTEP 设备，也就是 flannel.1 设备组成的虚拟二层网络。对于 VTEP 设备来说，它发出的“内部数据帧”就仿佛是一直在这个虚拟的二层网络上流动。这，也正是覆盖网络的含义。
-
-
-
-
-
-
-
-## Kubernetes网络模型与CNI网络插件
-
-- 以 Flannel 项目为例，容器跨主机网络的两种实现方法：UDP 和 VXLAN
-
-  - 这些例子有一个共性，那就是用户的容器都连接在 docker0 网桥上
-    - 网络插件则在宿主机上创建了一个特殊的设备
-    - 然后，网络插件真正要做的事情，则是通过某种方法，把不同宿主机上的特殊设备连通，从而达到容器跨主机通信的目的。
-    - docker0 与这个设备之间，通过 IP 转发（路由表）进行协作。
-  - Kubernetes 是通过一个叫作 CNI 的接口，维护了一个单独的网桥来代替 docker0。这个网桥的名字就叫作：CNI 网桥，它在宿主机上的设备名称默认是：cni0。
-
-- CNI 网桥
-
-  - CNI 网桥只是接管所有 CNI 插件负责的、即 Kubernetes 创建的容器（Pod）。
-  - Kubernetes 之所以要设置这样一个与 docker0 网桥功能几乎一样的 CNI 网桥，主要原因包括两个方面：
-    - 一方面，Kubernetes 项目并没有使用 Docker 的网络模型（CNM）
-    - 另一方面，这还与 Kubernetes 如何配置 Pod，也就是 Infra 容器的 Network Namespace密切相关。
-  - CNI 的设计思想，就是：Kubernetes 在启动 Infra 容器之后，就可以直接调用 CNI 网络插件，为这个 Infra 容器的 Network Namespace，配置符合预期的网络栈。
-
-- CNI 插件的工作原理
-
-  - 在 Kubernetes 中，处理容器网络相关的逻辑并不会在 kubelet 主干代码里执行，而是会在具体的 CRI（Container Runtime Interface，容器运行时接口）实现里完成。对于 Docker 项目来说，它的 CRI 实现叫作 dockershim
-
-  - CNI bridge 插件
-
-    - 功能：“将容器加入到CNI 网络里”
-
-    - CNI bridge 插件会在宿主机上检查 CNI 网桥是否存在。如果没有的话，那就创建它
-
-    - CNI bridge 插件会通过 Infra 容器的 Network Namespace 文件，进入到这个Network Namespace 里面，然后创建一对 Veth Pair 设备。
-
-    - 紧接着，它会把这个 Veth Pair 的其中一端，“移动”到宿主机上。
-
-    - 接下来，CNI bridge 插件会调用 CNI ipam 插件，为容器分配一个可用的 IP 地址。然后，CNI bridge 插件就会把这个 IP 地址添加在容器的 eth0 网卡上，同时为容器设置默认路由
-
-      - > 在容器里
-        >
-        > $ ip addr add 10.244.0.2/24 dev eth0
-        > $ ip route add default via 10.244.0.1 dev eth0
-
-    - 最后，CNI bridge 插件会为 CNI 网桥添加 IP 地址。
-
-      - > 在宿主机上
-        >
-        > $ ip addr add 10.244.0.1/24 dev cni0
-
-
-
-
-
-
-
-## Service底层（Informer）、DNS与服务发现
-
-- Kubernetes 之所以需要 Service，一方面是因为 Pod 的 IP 不是固定的，另一方面则是因为一组 Pod 实例之间总会有负载均衡的需求。
-
-  - > 这个 Service 的 80 端口，代理的是 Pod 的9376 端口
-    > 	port: 80
-    > 	 targetPort: 9376
-
-- Kubernetes 里的 Service 究竟是如何工作的呢？
-
-  - 实际上，Service 是由 kube-proxy 组件，加上 iptables 来共同实现的。
-
-    - > Service一旦它被提交给Kubernetes， kube-proxy 就可以通过 Service 的 Informer 感知到这样一个 Service 对象的添加，而作为对这个事件的响应，它就会在宿主机上创建这样一条 iptables 规则
-      >
-      > 
-      >
-      > 凡是目的地址是 10.0.1.175、目的端口是 80 的 IP包，都应该跳转到另外一条名叫 KUBE-SVC-NWV5X2332I4OT4T3
-
-    - 实际上，它是一组规则的集合，这一组规则（ DNAT 规则），实际上是一组随机模式（–mode random）的 iptables 链。
-
-      - 这条链指向的最终目的地，其实就是这个 Service 代理的Pod
-      - DNAT 规则的作用，就是在路由之前，将流入 IP 包的目的地址和端口，改成–to-destination 所指定的新的目的地址和端口。可以看到，这个目的地址和端口，正是被代理 Pod 的 IP 地址和端口。
-
-  - 所以这一组规则，就是 Service 实现负载均衡的位置。
-
-- **IPVS**
-
-  - kube-proxy 通过 iptables 处理 Service 的过程，其实需要在宿主机上设置相当多的 iptables 规则。而且，kube-proxy 还需要在控制循环里不断地刷新这些规则来确保它们始终是正确的
-    - 大量 Pod不断地被刷新，会大量占用该宿主机的 CPU 资源，基于iptables 的 Service 实现，都是制约 Kubernetes 项目承载更多量级的 Pod 的主要障碍。
-    - IPVS 模式的 Service，就是解决这个问题的一个行之有效的方法。
-  - IPVS 模式的工作原理，其实跟 iptables 模式类似。当我们创建了前面的 Service 之后，kube-proxy 首先会在宿主机上创建一个虚拟网卡（叫作：kube-ipvs0），并为它分配 Service VIP作为 IP 地址
-    - kube-proxy 就会通过 Linux 的 IPVS 模块，为这个 IP 地址设置三个 IPVS 虚拟主机，并设置这三个虚拟主机之间使用轮询模式 (rr) 来作为负载均衡策略
-    - 这三个 IPVS 虚拟主机的 IP 地址和端口，对应的正是三个被代理的 Pod。
-    - 这时候，任何发往 10.102.128.4:80 的请求，就都会被 IPVS 模块转发到某一个后端 Pod 上了
-
-- Service 与 DNS 的关系
-
-  - 在 Kubernetes 中，Service 和 Pod 都会被分配对应的 DNS A 记录（从域名解析 IP 的记录）
-
-  - ClusterIP 模式的 Service 为你提供的，就是一个 Pod 的稳定的 IP 地址，即 VIP。并且，这里 Pod 和 Service 的关系是可以通过 Label 确定的。
-
-  - 而 Headless Service 为你提供的，则是一个 Pod 的稳定的 DNS 名字，并且，这个名字是可以
-
-    通过 Pod 名字和 Service 名字拼接出来的。
-
-- Service 机制，以及Kubernetes 里的 DNS 插件，都是在帮助你解决同样一个问题，即：如何找到我的某一个容器？
-
-  - 这个问题在平台级项目中，往往就被称作服务发现，即：当我的一个服务（Pod）的 IP 地址是不固定的且没办法提前获知时，我该如何通过一个固定的方式访问到这个 Pod 呢？
-
-
-
-
-
-
-
-## Service
-
-- 所谓 Service 的访问入口，其实就是每台宿主机上由 kube-proxy 生成的iptables 规则，以及 kube-dns 生成的 DNS 记录。而一旦离开了这个集群，这些信息对用户来说，也就自然没有作用了。
-
-  - 在使用 Kubernetes 的 Service 时，一个必须要面对和解决的问题就是：如何从外部（Kubernetes 集群之外），访问到 Kubernetes 里创建的 Service？
-
-- **最常用的一种方式就是：NodePort**
-
-  - ```yaml
-    spec:
-     type: NodePort
-     ports:
-     - nodePort: 8080
-       targetPort: 80
-       protocol: TCP
-       name: http
-     - nodePort: 443
-       protocol: TCP
-       name: https
-    ```
-
-    
-
-  - 需要注意的是，在 NodePort 方式下，Kubernetes 会在 IP 包离开宿主机发往目的 Pod 时，对这个 IP 包做一次 SNAT 操作
-
-    - 将这个 IP 包的源地址替换成了这台宿主机上的 CNI 网桥地址，或者宿主机本身的 IP 地址（如果 CNI 网桥不存在的话）。
-
-- 从外部访问 Service 的第二种方式，适用于公有云上的 Kubernetes 服务。这时候，你可以指定一个 **LoadBalancer 类型的 Service**
-
-  - ```yaml
-    spec:
-     ports:
-     - port: 8765
-       targetPort: 9376
-     selector:
-      app: example
-     type: LoadBalancer
-    ```
-
-- 第三种方式，是 Kubernetes 在 1.7 之后支持的一个新特性，叫作 **ExternalName**
-
-  - ```yaml
-    # 当你通过 Service 的 DNS 名字访问它的时候，比如访问：my-service.default.svc.cluster.local。那么，Kubernetes 为你返回的就是my.database.example.com。
-    metadata:
-     name: my-service
-    spec:
-     type: ExternalName
-     externalName: my.database.example.com
-     
-     
-     # Kubernetes 的 Service 还允许你为 Service 分配公有 IP 地址
-     spec:
-      selector:
-       app: MyApp
-      ports:
-      - name: http
-        protocol: TCP
-        port: 80
-        targetPort: 9376
-        externalIPs:
-         - 80.11.12.10
-    ```
-
-- 很多与 Service 相关的问题，其实都可以通过分析 Service 在宿主机上对应的 iptables 规则（或者 IPVS 配置）得到解决。
-
-  - 比如，当你的 Service 没办法通过 DNS 访问到的时候。你就需要区分到底是 Service 本身的配置问题，还是集群的 DNS 出了问题。一个行之有效的方法，就是检查 Kubernetes 自己的Master 节点的 Service DNS 是否正常：
-
-    - > 在一个 Pod 里执行
-      >
-      > $ nslookup kubernetes.default
-      > 如果上面访问 kubernetes.default 返回的值都有问题，那你就需要检查 kube-dns 的运行状态和日志了。否则的话，你应该去检查自己的 Service 定义是不是有问题
-
-  - 而如果你的 Service 没办法通过 ClusterIP 访问到的时候，你首先应该检查的是这个 Service 是否有 Endpoints
-
-    - > $ kubectl get endpoints hostnames
-      > NAME ENDPOINTS
-      > hostnames 10.244.0.5:9376,10.244.0.6:9376,10.244.0.7:9376
-      > 如果 Endpoints 正常，那么你就需要确认 kube-proxy 是否在正确运行
-      > 如果 kube-proxy 一切正常，你就应该仔细查看宿主机上的 iptables 了。
-
-  - 还有一种典型问题，就是 Pod 没办法通过 Service 访问到自己
-
-    - 你只需要确保将 kubelet 的 hairpin-mode 设置为 hairpin-veth 或者promiscuous-bridge 即可。
-
-- 所谓 Service，其实就是 Kubernetes 为 Pod 分配的固定的、基于iptables（或者 IPVS）的访问入口。而这些访问入口代理的 Pod 信息，则来自于 Etcd，由kube-proxy 通过控制循环来维护。
-
-  - Kubernetes 里面的 Service 和 DNS 机制，也都不具备强多租户能力。比如，在多租户情况下，每个租户应该拥有一套独立的 Service 规则
-  - 再比如 DNS，在多租户情况下，每个租户应该拥有自己的 kube-dns
-  - 多租户是指软件架构支持一个实例服务多个用户（Customer），每一个用户被称之为租户（tenant），软件给予租户可以对系统进行部分定制的能力
-
-
-
-
-
-
-
-## Service与Ingress
-
-- 作为用户，我其实更希望看到 Kubernetes 为我内置一个全局的负载均衡器。然后，通过我访问的 URL，把请求转发给不同的后端 Service。
-  - 这种全局的、为了代理不同后端 Service 而设置的负载均衡服务，就是 Kubernetes 里的Ingress 服务。
-  - 所谓 Ingress，就是 Service 的“Service”
-- 我如何能使用 Kubernetes 的 Ingress 来创建一个统一的负载均衡器，从而实现当用户访问不同的域名时，能够访问到不同的 Deployment 呢？
-  - 上述功能，在 Kubernetes 里就需要通过 Ingress 对象来描述
-  - IngressRule 的 Key，就叫做：host。是这个 Ingress 的入口
-  - IngressRule 规则的定义，则依赖于 path 字段，你可以简单地理解为，这里的每一个path 都对应一个后端 Service。
-- 所谓 Ingress 对象，其实就是 Kubernetes 项目对“反向代理”的一种抽象。
-  - 实际的使用中，你只需要从社区里选择一个具体的 Ingress Controller，把它部署在Kubernetes 集群里即可。
-  - 然后，这个 Ingress Controller 会根据你定义的 Ingress 对象，提供对应的代理能力。
-- Ingress Controller
-  - Nginx 官方为你维护的 Ingress Controller 的定义的YAML 文件中定义了一个使用 nginx-ingress-controller 镜像的Pod。
-    - 当一个新的 Ingress 对象由用户创建后，nginx-ingress-controller 就会根据 Ingress 对象里定义的内容，生成一份对应的 Nginx 配置文件（/etc/nginx/nginx.conf），并使用这个配置文件启动一个 Nginx 服务。
-    - nginx-ingress-controller 还允许你通过 Kubernetes 的 ConfigMap 对象来对上述Nginx 配置文件进行定制
-    - 一个 Nginx Ingress Controller 为你提供的服务，其实是一个可以根据 Ingress对象和被代理后端 Service 的变化，来自动进行更新的 Nginx 负载均衡器。
-  - 为了让用户能够用到这个 Nginx，我们就需要创建一个 Service 来把 Nginx Ingress Controller 管理的 Nginx 服务暴露出去
-- 我们就可以通过访问这个 Ingress 的地址和端口，访问到我们前面部署的应用了
-  - 目前，Ingress 只能工作在七层，而 Service 只能工作在四层。所以当你想要在 Kubernetes 里为应用进行 TLS 配置等 HTTP 相关的操作时，都必须通过 Ingress 来进行。
-  - Ingress 简单的理解就是你原来需要改 Nginx 配置，然后配置各种域名对应哪个 Service，现在把这个动作抽象出来，变成一个 Ingress 对象，你可以用 yaml 创建，每次不要去改 Nginx 了，直接改 yaml 然后创建/更新就行了；
-  - 那么问题来了：”Nginx 该怎么处理？”Ingress Controller 这东西就是解决 “Nginx 的处理方式” 的；Ingress Controoler 通过与 Kubernetes API 交互，动态的去感知集群中 Ingress 规则变化，然后读取他，按照他自己模板生成一段 Nginx 配置，再写到 Nginx Pod 里，最后 reload 一下
 
 
 
