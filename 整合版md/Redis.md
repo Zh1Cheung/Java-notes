@@ -18,6 +18,100 @@ Redis高并发快总结
 
 
 
+## 单线程/并发竞争
+
+- 为什么Redis是单线程的
+
+  - CPU不是Redis的瓶颈，Redis的瓶颈最有可能是机器内存的大小或者网络带宽
+  - 这里我们一直在强调的单线程，只是在处理我们的网络请求的时候只有一个线程来处理
+    - Redis进行持久化的时候会以子进程或者子线程的方式执行
+  - 因为是单一线程，所以同一时刻只有一个操作在进行，所以，耗时的命令会导致并发的下降，不只是读并发，写并发也会下降。而单一线程也只能用到一个CPU核心
+    - 我们使用单线程的方式是无法发挥多核CPU 性能，不过我们可以通过在单机开多个Redis 实例来完善
+    - 在多处理器情况下，不能充分利用其他CPU。可以的解决方法是开启多个redis服务实例，通过复制和修改配置文件，可以在多个端口上开启多个redis服务实例，这样就可以利用其他CPU来处理连接流
+    - 所以可以在同一个多核的服务器中，可以启动多个实例，组成master-master或者master-slave的形式，耗时的读命令可以完全在slave进行
+    - 由于是单线程模型，Redis 更喜欢大缓存快速 CPU， 而不是多核
+
+- 并发竞争
+
+  - 多客户端同时并发写一个key，可能本来应该先到的数据后到了，导致数据版本错了。或者是多客户端同时获取一个key，修改值之后再写回去，只要顺序错了，数据就错了。
+
+  - 并发写竞争解决方案
+
+    - 利用redis自带的incr命令
+
+      - 数字值在 Redis 中以字符串的形式保存
+
+      - 可以通过组合使用 INCR 和 EXPIRE，来达到只在规定的生存时间内进行计数(counting)的目的。
+
+      - 客户端可以通过使用 GETSET命令原子性地获取计数器的当前值并将计数器清零
+
+      - 使用其他自增/自减操作，比如 DECR 和 INCRBY ，用户可以通过执行不同的操作增加
+
+        或减少计数器的值，比如在游戏中的记分器就可能用到这些命令
+
+    - 独占锁的方式，类似操作系统的mutex机制
+
+    - 乐观锁的方式进行解决（成本较低，非阻塞，性能较高）
+
+      - 使用redis的命令watch进行构造条件
+
+      - watch这里表示监控该key值，后面的事务是有条件的执行，如果watch的key对应的value值被修改了，则事务不会执行
+
+      - > T1
+        > set key1 value1
+        > 初始化key1
+        > T2
+        > watch key1
+        > 监控 key1 的键值对
+        > T3
+        > multi
+        > 开启事务
+        > T4
+        > set key2 value2
+        > 设置 key2 的值
+        > T5
+        > exec
+        > 提交事务，Redis 会在这个时间点检测 key1 的值在 T2 时刻后，有没有被其他命令修改过，如果没有，则提交事务去执行
+
+    - 针对客户端来的，在代码里要对redis操作的时候，针对同一key的资源，就先进行加锁（java里的synchronized或lock）。
+
+    - 利用redis的set（使用set来获取锁, Lua 脚本来释放锁）
+
+      - 考虑可以使用SETNX，将 key 的值设为 value ，当且仅当 key 不存在。
+
+      - ```java
+        /* 第一个为key，我们使用key来当锁名
+           第二个为value，我们传的是uid，唯一随机数，也可以使用本机mac地址 + uuid
+           第三个为NX，意思是SET IF NOT EXIST，即当key不存在时，我们进行set操作；若key已经存在，则不做任何操作 
+        	第四个为PX，意思是我们要给这个key加一个过期的设置，具体时间由第五个参数决定 
+        	第五个为time，代表key的过期时间，对应第四个参数 PX毫秒，EX秒
+        */
+        String result = jedis.set(key, value, "NX", "PX", expireMillis);
+        if (result != null && result.equalsIgnoreCase("OK")) {
+        	flag = true;
+        }
+        
+        
+        // ---
+        
+        // 执行脚本的常用命令为 EVAL。 
+        // 原子操作：Redis会将整个脚本作为一个整体执行，中间不会被其他命令插入
+        // redis.call 函数的返回值就是redis命令的执行结果
+        
+        
+        String script = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+        Object result = jedis.eval(script,Collections.singletonList(fullKey),Collections.singletonList(value));
+        if (Objects.equals(UNLOCK_SUCCESS, result)) {
+            flag = true;
+        }
+        
+        
+        ```
+
+        
+
+
+
 ## 应用场景
 
 - 数据高速缓存,web会话缓存（Session Cache）
@@ -2004,311 +2098,9 @@ Redis 拓扑结构信息包括了：
 
 
 
-## 9个redis命令
 
-### keys
 
-我把这个命令放在第一位，是因为笔者曾经做过的项目，以及一些朋友的项目，都因为使用`keys`这个命令，导致出现性能毛刺。这个命令的时间复杂度是O(N)，而且redis又是单线程执行，在执行keys时即使是时间复杂度只有O(1)例如SET或者GET这种简单命令也会堵塞，从而导致这个时间点性能抖动，甚至可能出现timeout。
 
-> **强烈建议生产环境屏蔽keys命令**（后面会介绍如何屏蔽）。
-
-### scan
-
-既然keys命令不允许使用，那么有什么代替方案呢？有！那就是`scan`命令。如果把keys命令比作类似`select * from users where username like '%afei%'`这种SQL，那么scan应该是`select * from users where id>? limit 10`这种命令。
-
-官方文档用法如下：
-
-```css
-SCAN cursor [MATCH pattern] [COUNT count]
-```
-
-初始执行scan命令例如`scan 0`。SCAN命令是一个基于游标的迭代器。这意味着命令每次被调用都需要使用上一次这个调用返回的游标作为该次调用的游标参数，以此来延续之前的迭代过程。当SCAN命令的游标参数被设置为0时，服务器将开始一次新的迭代，而**当redis服务器向用户返回值为0的游标时，表示迭代已结束**，这是唯一迭代结束的判定方式，而不能通过返回结果集是否为空判断迭代结束。
-
-使用方式：
-
-```ruby
-127.0.0.1:6380> scan 0
-1) "22"
-2)  1) "23"
-    2) "20"
-    3) "14"
-    4) "2"
-    5) "19"
-    6) "9"
-    7) "3"
-    8) "21"
-    9) "12"
-   10) "25"
-   11) "7"
-```
-
-返回结果分为两个部分：第一部分即1)就是下一次迭代游标，第二部分即2)就是本次迭代结果集。
-
-### slowlog
-
-上面提到不能使用keys命令，如果就有开发这么做了呢，我们如何得知？与其他任意存储系统例如mysql，mongodb可以查看慢日志一样，redis也可以，即通过命令`slowlog`。用法如下：
-
-```css
-SLOWLOG subcommand [argument]
-```
-
-subcommand主要有：
-
--  **get**，用法：slowlog get [argument]，获取argument参数指定数量的慢日志。
--  **len**，用法：slowlog len，总慢日志数量。
--  **reset**，用法：slowlog reset，清空慢日志。
-
-执行结果如下：
-
-```bash
-127.0.0.1:6380> slowlog get 5
-1) 1) (integer) 2
-   2) (integer) 1532656201
-   3) (integer) 2033
-   4) 1) "flushddbb"
-2) 1) (integer) 1  ----  慢日志编码，一般不用care
-   2) (integer) 1532646897  ----  导致慢日志的命令执行的时间点，如果api有timeout，可以通过对比这个时间，判断可能是慢日志命令执行导致的
-   3) (integer) 26424  ----  导致慢日志执行的redis命令，通过4)可知，执行config rewrite导致慢日志，总耗时26ms+
-   4) 1) "config"
-      2) "rewrite"
-```
-
-> 命令耗时超过多少才会保存到slowlog中，可以通过命令`config set slowlog-log-slower-than 2000`配置并且不需要重启redis。注意：单位是微妙，2000微妙即2毫秒。
-
-### rename-command
-
-为了防止把问题带到生产环境，我们可以通过配置文件重命名一些危险命令，例如`keys`等一些高危命令。操作非常简单，只需要在conf配置文件增加如下所示配置即可：
-
-```undefined
-rename-command flushdb flushddbb
-rename-command flushall flushallall
-rename-command keys keysys
-```
-
-### bigkeys
-
-随着项目越做越大，缓存使用越来越不规范。我们如何检查生产环境上一些有问题的数据。`bigkeys`就派上用场了，用法如下：
-
-```undefined
-redis-cli -p 6380 --bigkeys
-```
-
-执行结果如下：
-
-```python
-... ...
--------- summary -------
-
-Sampled 526 keys in the keyspace!
-Total key length in bytes is 1524 (avg len 2.90)
-
-Biggest string found 'test' has 10005 bytes
-Biggest   list found 'commentlist' has 13 items
-
-524 strings with 15181 bytes (99.62% of keys, avg size 28.97)
-2 lists with 19 items (00.38% of keys, avg size 9.50)
-0 sets with 0 members (00.00% of keys, avg size 0.00)
-0 hashs with 0 fields (00.00% of keys, avg size 0.00)
-0 zsets with 0 members (00.00% of keys, avg size 0.00)
-```
-
-最后5行可知，没有set,hash,zset几种数据结构的数据。string类型有524个，list类型有两个；通过`Biggest ... ...`可知，最大string结构的key是`test`，最大list结构的key是`commentlist`。
-
-需要注意的是，这个**bigkeys得到的最大，不一定是最大**。说明原因前，首先说明`bigkeys`的原理，非常简单，通过scan命令遍历，各种不同数据结构的key，分别通过不同的命令得到最大的key：
-
-- 如果是string结构，通过`strlen`判断；
-- 如果是list结构，通过`llen`判断；
-- 如果是hash结构，通过`hlen`判断；
-- 如果是set结构，通过`scard`判断；
-- 如果是sorted set结构，通过`zcard`判断。
-
-> 正因为这样的判断方式，虽然string结构肯定可以正确的筛选出最占用缓存，也可以说最大的key。但是list不一定，例如，现在有两个list类型的key，分别是：numberlist--[0,1,2]，stringlist--["123456789123456789"]，由于通过llen判断，所以numberlist要大于stringlist。而事实上stringlist更占用内存。其他三种数据结构hash，set，sorted set都会存在这个问题。使用bigkeys一定要注意这一点。
-
-### monitor
-
-假设生产环境没有屏蔽keys等一些高危命令，并且slowlog中还不断有新的keys导致慢日志。那我们如何揪出这些命令是由谁执行的呢？这就是`monitor`的用处，用法如下：
-
-```undefined
-redis-cli -p 6380 monitor
-```
-
-如果当前redis环境OPS比较高，那么建议结合linux管道命令优化，只输出keys命令的执行情况：
-
-```csharp
-[afei@redis ~]# redis-cli -p 6380 monitor | grep keys 
-1532645266.656525 [0 10.0.0.1:43544] "keyss" "*"
-1532645287.257657 [0 10.0.0.1:43544] "keyss" "44*"
-```
-
-执行结果中很清楚的看到keys命名执行来源。通过输出的IP和端口信息，就能在目标服务器上找到执行这条命令的进程，揪出元凶，勒令整改。
-
-### info
-
-如果说哪个命令能最全面反映当前redis运行情况，那么非info莫属。用法如下：
-
-```css
-INFO [section]
-```
-
-section可选值有：
-
--  **Server**：运行的redis实例一些信息，包括：redis版本，操作系统信息，端口，GCC版本，配置文件路径等；
--  **Clients**：redis客户端信息，包括：已连接客户端数量，阻塞客户端数量等；
--  **Memory**：使用内存，峰值内存，内存碎片率，内存分配方式。这几个参数都非常重要；
--  **Persistence**：AOF和RDB持久化信息；
--  **Stats**：一些统计信息，最重要三个参数：OPS(`instantaneous_ops_per_sec`)，`keyspace_hits`和`keyspace_misses`两个参数反应缓存命中率；
--  **Replication**：redis集群信息；
--  **CPU**：CPU相关信息；
--  **Keyspace**：redis中各个DB里key的信息；
-
-### config
-
-config是一个非常有价值的命令，主要体现在对redis的运维。因为生产环境一般是不允许随意重启的，不能因为需要调优一些参数就修改conf配置文件并重启。redis作者早就想到了这一点，通过config命令能热修改一些配置，不需要重启redis实例，可以通过如下命令查看哪些参数可以热修改：
-
-```csharp
-config get *
-```
-
-热修改就比较容易了，执行如下命令即可：
-
-```bash
-config set 
-```
-
-例如：`config set slowlog-max-len 100`，`config set maxclients 1024`
-
-这样修改的话，如果以后由于某些原因redis实例故障需要重启，那通过config热修改的参数就会被配置文件中的参数覆盖，所以我们需要通过一个命令将config热修改的参数刷到redis配置文件中持久化，通过执行如下命令即可：
-
-```undefined
-config rewrite
-```
-
-执行该命令后，我们能在config文件中看到类似这种信息：
-
-```kotlin
-# 如果conf中本来就有这个参数，通过执行config set，那么redis直接原地修改配置文件
-maxclients 1024
-# 如果conf中没有这个参数，通过执行config set，那么redis会追加在Generated by CONFIG REWRITE字样后面
-# Generated by CONFIG REWRITE
-save 600 60
-slowlog-max-len 100
-```
-
-### set
-
-set命令也能提升逼格？是的，我本不打算写这个命令，但是我见过太多人没有完全掌握这个命令，官方文档介绍的用法如下：
-
-```css
-SET key value [EX seconds] [PX milliseconds] [NX|XX]
-```
-
-你可能用的比较多的就是`set key value`，或者`SETEX key seconds value`，所以很多同学用redis实现分布式锁分为两步：首先执行`SETNX key value`，然后执行`EXPIRE key seconds`。很明显，这种实现有很严重的问题，因为两步执行不具备原子性，如果执行第一个命令后出现某些未知异常导致无法执行`EXPIRE key seconds`，那么分布式锁就会一直无法得到释放。
-
-通过`SET`命令实现分布式锁的正式姿势应该是`SET key value EX seconds NX`（EX和PX任选，取决于对过期时间精度要求）。另外，value也有要求，最好是一个类似UUID这种具备唯一性的字符串。当然如果问你redis是否还有其他实现分布式锁的方案。你能说出redlock，那对方一定眼前一亮，心里对你竖起大拇指，但嘴上不会说。
-
-
-
-
-
-
-
-
-
-
-
-
-
-## 单线程/并发竞争
-
-- 为什么Redis是单线程的
-
-  - CPU不是Redis的瓶颈，Redis的瓶颈最有可能是机器内存的大小或者网络带宽
-  - 这里我们一直在强调的单线程，只是在处理我们的网络请求的时候只有一个线程来处理
-    - Redis进行持久化的时候会以子进程或者子线程的方式执行
-  - 因为是单一线程，所以同一时刻只有一个操作在进行，所以，耗时的命令会导致并发的下降，不只是读并发，写并发也会下降。而单一线程也只能用到一个CPU核心
-    - 我们使用单线程的方式是无法发挥多核CPU 性能，不过我们可以通过在单机开多个Redis 实例来完善
-    - 在多处理器情况下，不能充分利用其他CPU。可以的解决方法是开启多个redis服务实例，通过复制和修改配置文件，可以在多个端口上开启多个redis服务实例，这样就可以利用其他CPU来处理连接流
-    - 所以可以在同一个多核的服务器中，可以启动多个实例，组成master-master或者master-slave的形式，耗时的读命令可以完全在slave进行
-    - 由于是单线程模型，Redis 更喜欢大缓存快速 CPU， 而不是多核
-
-- 并发竞争
-
-  - 多客户端同时并发写一个key，可能本来应该先到的数据后到了，导致数据版本错了。或者是多客户端同时获取一个key，修改值之后再写回去，只要顺序错了，数据就错了。
-
-  - 并发写竞争解决方案
-
-    - 利用redis自带的incr命令
-
-      - 数字值在 Redis 中以字符串的形式保存
-
-      - 可以通过组合使用 INCR 和 EXPIRE，来达到只在规定的生存时间内进行计数(counting)的目的。
-
-      - 客户端可以通过使用 GETSET命令原子性地获取计数器的当前值并将计数器清零
-
-      - 使用其他自增/自减操作，比如 DECR 和 INCRBY ，用户可以通过执行不同的操作增加
-
-        或减少计数器的值，比如在游戏中的记分器就可能用到这些命令
-
-    - 独占锁的方式，类似操作系统的mutex机制
-
-    - 乐观锁的方式进行解决（成本较低，非阻塞，性能较高）
-
-      - 使用redis的命令watch进行构造条件
-
-      - watch这里表示监控该key值，后面的事务是有条件的执行，如果watch的key对应的value值被修改了，则事务不会执行
-
-      - > T1
-        > set key1 value1
-        > 初始化key1
-        > T2
-        > watch key1
-        > 监控 key1 的键值对
-        > T3
-        > multi
-        > 开启事务
-        > T4
-        > set key2 value2
-        > 设置 key2 的值
-        > T5
-        > exec
-        > 提交事务，Redis 会在这个时间点检测 key1 的值在 T2 时刻后，有没有被其他命令修改过，如果没有，则提交事务去执行
-
-    - 针对客户端来的，在代码里要对redis操作的时候，针对同一key的资源，就先进行加锁（java里的synchronized或lock）。
-
-    - 利用redis的set（使用set来获取锁, Lua 脚本来释放锁）
-
-      - 考虑可以使用SETNX，将 key 的值设为 value ，当且仅当 key 不存在。
-
-      - ```java
-        /* 第一个为key，我们使用key来当锁名
-           第二个为value，我们传的是uid，唯一随机数，也可以使用本机mac地址 + uuid
-           第三个为NX，意思是SET IF NOT EXIST，即当key不存在时，我们进行set操作；若key已经存在，则不做任何操作 
-        	第四个为PX，意思是我们要给这个key加一个过期的设置，具体时间由第五个参数决定 
-        	第五个为time，代表key的过期时间，对应第四个参数 PX毫秒，EX秒
-        */
-        String result = jedis.set(key, value, "NX", "PX", expireMillis);
-        if (result != null && result.equalsIgnoreCase("OK")) {
-        	flag = true;
-        }
-        
-        
-        // ---
-        
-        // 执行脚本的常用命令为 EVAL。 
-        // 原子操作：Redis会将整个脚本作为一个整体执行，中间不会被其他命令插入
-        // redis.call 函数的返回值就是redis命令的执行结果
-        
-        
-        String script = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
-        Object result = jedis.eval(script,Collections.singletonList(fullKey),Collections.singletonList(value));
-        if (Objects.equals(UNLOCK_SUCCESS, result)) {
-            flag = true;
-        }
-        
-        
-        ```
-
-        
 
 
 
@@ -2783,6 +2575,214 @@ if (key.isReadable()) {
   - 分数(score)允许重复，即skiplist的key允许重复。这在最开始介绍的经典skiplist中是不允许的
   - 在比较时，不仅比较分数（相当于skiplist的key），还比较数据本身。在Redis的skiplist实现中，数据本身的内容唯一标识这份数据，而不是由key来唯一标识
   - 第1层链表不是一个单向链表，而是一个双向链表。这是为了方便以倒序方式获取一个范围内的元素
+
+
+
+
+
+
+
+## 9个redis命令
+
+keys
+
+我把这个命令放在第一位，是因为笔者曾经做过的项目，以及一些朋友的项目，都因为使用`keys`这个命令，导致出现性能毛刺。这个命令的时间复杂度是O(N)，而且redis又是单线程执行，在执行keys时即使是时间复杂度只有O(1)例如SET或者GET这种简单命令也会堵塞，从而导致这个时间点性能抖动，甚至可能出现timeout。
+
+> **强烈建议生产环境屏蔽keys命令**（后面会介绍如何屏蔽）。
+
+### scan
+
+既然keys命令不允许使用，那么有什么代替方案呢？有！那就是`scan`命令。如果把keys命令比作类似`select * from users where username like '%afei%'`这种SQL，那么scan应该是`select * from users where id>? limit 10`这种命令。
+
+官方文档用法如下：
+
+```css
+SCAN cursor [MATCH pattern] [COUNT count]
+```
+
+初始执行scan命令例如`scan 0`。SCAN命令是一个基于游标的迭代器。这意味着命令每次被调用都需要使用上一次这个调用返回的游标作为该次调用的游标参数，以此来延续之前的迭代过程。当SCAN命令的游标参数被设置为0时，服务器将开始一次新的迭代，而**当redis服务器向用户返回值为0的游标时，表示迭代已结束**，这是唯一迭代结束的判定方式，而不能通过返回结果集是否为空判断迭代结束。
+
+使用方式：
+
+```ruby
+127.0.0.1:6380> scan 0
+1) "22"
+2)  1) "23"
+    2) "20"
+    3) "14"
+    4) "2"
+    5) "19"
+    6) "9"
+    7) "3"
+    8) "21"
+    9) "12"
+   10) "25"
+   11) "7"
+```
+
+返回结果分为两个部分：第一部分即1)就是下一次迭代游标，第二部分即2)就是本次迭代结果集。
+
+### slowlog
+
+上面提到不能使用keys命令，如果就有开发这么做了呢，我们如何得知？与其他任意存储系统例如mysql，mongodb可以查看慢日志一样，redis也可以，即通过命令`slowlog`。用法如下：
+
+```css
+SLOWLOG subcommand [argument]
+```
+
+subcommand主要有：
+
+- **get**，用法：slowlog get [argument]，获取argument参数指定数量的慢日志。
+- **len**，用法：slowlog len，总慢日志数量。
+- **reset**，用法：slowlog reset，清空慢日志。
+
+执行结果如下：
+
+```bash
+127.0.0.1:6380> slowlog get 5
+1) 1) (integer) 2
+   2) (integer) 1532656201
+   3) (integer) 2033
+   4) 1) "flushddbb"
+2) 1) (integer) 1  ----  慢日志编码，一般不用care
+   2) (integer) 1532646897  ----  导致慢日志的命令执行的时间点，如果api有timeout，可以通过对比这个时间，判断可能是慢日志命令执行导致的
+   3) (integer) 26424  ----  导致慢日志执行的redis命令，通过4)可知，执行config rewrite导致慢日志，总耗时26ms+
+   4) 1) "config"
+      2) "rewrite"
+```
+
+> 命令耗时超过多少才会保存到slowlog中，可以通过命令`config set slowlog-log-slower-than 2000`配置并且不需要重启redis。注意：单位是微妙，2000微妙即2毫秒。
+
+### rename-command
+
+为了防止把问题带到生产环境，我们可以通过配置文件重命名一些危险命令，例如`keys`等一些高危命令。操作非常简单，只需要在conf配置文件增加如下所示配置即可：
+
+```undefined
+rename-command flushdb flushddbb
+rename-command flushall flushallall
+rename-command keys keysys
+```
+
+### bigkeys
+
+随着项目越做越大，缓存使用越来越不规范。我们如何检查生产环境上一些有问题的数据。`bigkeys`就派上用场了，用法如下：
+
+```undefined
+redis-cli -p 6380 --bigkeys
+```
+
+执行结果如下：
+
+```python
+... ...
+-------- summary -------
+
+Sampled 526 keys in the keyspace!
+Total key length in bytes is 1524 (avg len 2.90)
+
+Biggest string found 'test' has 10005 bytes
+Biggest   list found 'commentlist' has 13 items
+
+524 strings with 15181 bytes (99.62% of keys, avg size 28.97)
+2 lists with 19 items (00.38% of keys, avg size 9.50)
+0 sets with 0 members (00.00% of keys, avg size 0.00)
+0 hashs with 0 fields (00.00% of keys, avg size 0.00)
+0 zsets with 0 members (00.00% of keys, avg size 0.00)
+```
+
+最后5行可知，没有set,hash,zset几种数据结构的数据。string类型有524个，list类型有两个；通过`Biggest ... ...`可知，最大string结构的key是`test`，最大list结构的key是`commentlist`。
+
+需要注意的是，这个**bigkeys得到的最大，不一定是最大**。说明原因前，首先说明`bigkeys`的原理，非常简单，通过scan命令遍历，各种不同数据结构的key，分别通过不同的命令得到最大的key：
+
+- 如果是string结构，通过`strlen`判断；
+- 如果是list结构，通过`llen`判断；
+- 如果是hash结构，通过`hlen`判断；
+- 如果是set结构，通过`scard`判断；
+- 如果是sorted set结构，通过`zcard`判断。
+
+> 正因为这样的判断方式，虽然string结构肯定可以正确的筛选出最占用缓存，也可以说最大的key。但是list不一定，例如，现在有两个list类型的key，分别是：numberlist--[0,1,2]，stringlist--["123456789123456789"]，由于通过llen判断，所以numberlist要大于stringlist。而事实上stringlist更占用内存。其他三种数据结构hash，set，sorted set都会存在这个问题。使用bigkeys一定要注意这一点。
+
+### monitor
+
+假设生产环境没有屏蔽keys等一些高危命令，并且slowlog中还不断有新的keys导致慢日志。那我们如何揪出这些命令是由谁执行的呢？这就是`monitor`的用处，用法如下：
+
+```undefined
+redis-cli -p 6380 monitor
+```
+
+如果当前redis环境OPS比较高，那么建议结合linux管道命令优化，只输出keys命令的执行情况：
+
+```csharp
+[afei@redis ~]# redis-cli -p 6380 monitor | grep keys 
+1532645266.656525 [0 10.0.0.1:43544] "keyss" "*"
+1532645287.257657 [0 10.0.0.1:43544] "keyss" "44*"
+```
+
+执行结果中很清楚的看到keys命名执行来源。通过输出的IP和端口信息，就能在目标服务器上找到执行这条命令的进程，揪出元凶，勒令整改。
+
+### info
+
+如果说哪个命令能最全面反映当前redis运行情况，那么非info莫属。用法如下：
+
+```css
+INFO [section]
+```
+
+section可选值有：
+
+- **Server**：运行的redis实例一些信息，包括：redis版本，操作系统信息，端口，GCC版本，配置文件路径等；
+- **Clients**：redis客户端信息，包括：已连接客户端数量，阻塞客户端数量等；
+- **Memory**：使用内存，峰值内存，内存碎片率，内存分配方式。这几个参数都非常重要；
+- **Persistence**：AOF和RDB持久化信息；
+- **Stats**：一些统计信息，最重要三个参数：OPS(`instantaneous_ops_per_sec`)，`keyspace_hits`和`keyspace_misses`两个参数反应缓存命中率；
+- **Replication**：redis集群信息；
+- **CPU**：CPU相关信息；
+- **Keyspace**：redis中各个DB里key的信息；
+
+### config
+
+config是一个非常有价值的命令，主要体现在对redis的运维。因为生产环境一般是不允许随意重启的，不能因为需要调优一些参数就修改conf配置文件并重启。redis作者早就想到了这一点，通过config命令能热修改一些配置，不需要重启redis实例，可以通过如下命令查看哪些参数可以热修改：
+
+```csharp
+config get *
+```
+
+热修改就比较容易了，执行如下命令即可：
+
+```bash
+config set 
+```
+
+例如：`config set slowlog-max-len 100`，`config set maxclients 1024`
+
+这样修改的话，如果以后由于某些原因redis实例故障需要重启，那通过config热修改的参数就会被配置文件中的参数覆盖，所以我们需要通过一个命令将config热修改的参数刷到redis配置文件中持久化，通过执行如下命令即可：
+
+```undefined
+config rewrite
+```
+
+执行该命令后，我们能在config文件中看到类似这种信息：
+
+```kotlin
+# 如果conf中本来就有这个参数，通过执行config set，那么redis直接原地修改配置文件
+maxclients 1024
+# 如果conf中没有这个参数，通过执行config set，那么redis会追加在Generated by CONFIG REWRITE字样后面
+# Generated by CONFIG REWRITE
+save 600 60
+slowlog-max-len 100
+```
+
+### set
+
+set命令也能提升逼格？是的，我本不打算写这个命令，但是我见过太多人没有完全掌握这个命令，官方文档介绍的用法如下：
+
+```css
+SET key value [EX seconds] [PX milliseconds] [NX|XX]
+```
+
+你可能用的比较多的就是`set key value`，或者`SETEX key seconds value`，所以很多同学用redis实现分布式锁分为两步：首先执行`SETNX key value`，然后执行`EXPIRE key seconds`。很明显，这种实现有很严重的问题，因为两步执行不具备原子性，如果执行第一个命令后出现某些未知异常导致无法执行`EXPIRE key seconds`，那么分布式锁就会一直无法得到释放。
+
+通过`SET`命令实现分布式锁的正式姿势应该是`SET key value EX seconds NX`（EX和PX任选，取决于对过期时间精度要求）。另外，value也有要求，最好是一个类似UUID这种具备唯一性的字符串。当然如果问你redis是否还有其他实现分布式锁的方案。你能说出redlock，那对方一定眼前一亮，心里对你竖起大拇指，但嘴上不会说。
 
 
 
