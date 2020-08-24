@@ -1055,6 +1055,429 @@ Hotspot VM将堆划分为不同的物理区，就是“分代”思想的体现�
   
   
 
+
+
+## 内存泄漏 内存溢出
+
+- 内存泄漏的两种情况：一是堆中申请的内存没释放；二是对象已不再使用，但还在内存中保留着。
+
+- 内存泄露的症状：
+
+  ​    应用程序长时间连续运行时性能严重下降；
+
+  ​    应用程序中的OutOfMemoryError堆错误；
+
+  ​    自发且奇怪的应用程序崩溃；
+
+  ​    应用程序偶尔会耗尽连接对象。
+
+- 场景
+
+  - #### 1、static字段引起的内存泄露
+
+    大量使用static字段会潜在的导致内存泄露，在Java中，静态字段通常拥有与整个应用程序相匹配的生命周期。
+
+    解决办法：最大限度的减少静态变量的使用；单例模式时，依赖于延迟加载对象而不是立即加载方式。
+
+    #### 2、未关闭的资源导致内存泄露
+
+    每当创建连接或者打开流时，JVM都会为这些资源分配内存。如果没有关闭连接，会导致持续占有内存。在任意情况下，资源留下的开放连接都会消耗内存，如果我们不处理，就会降低性能，甚至OOM。
+
+    解决办法：使用finally块关闭资源；关闭资源的代码，不应该有异常；jdk1.7后，可以使用try-with-resource块。
+
+    #### 3、不正确的equals()和hashCode()
+
+    在HashMap和HashSet这种集合中，常常用到equal()和hashCode()来比较对象，如果重写不合理，将会成为潜在的内存泄露问题。
+
+    解决办法：用最佳的方式重写equals()和hashCode。
+
+    #### 4、引用了外部类的内部类
+
+    非静态内部内的初始化，总是需要外部类的实例；默认情况下，每个非静态内部类都包含对其包含内的隐式引用，如果我们在应用程序中使用这个内部类对象，那么即使在我们的包含类对象超出范围后，它也不会被垃圾收集。
+
+    解决办法：如果内部类不需要访问包含的类成员，考虑转换为静态类。
+
+    #### 5、finalize()方法造成的内存泄露
+
+    重写finalize()方法时，该类的对象不会立即被垃圾收集器收集，如果finalize()方法的代码有问题，那么会潜在的引发OOM；
+
+    解决办法：避免重写finalize()。
+
+    #### 6、常量字符串造成的内存泄露
+
+    如果我们读取一个很大的String对象，并调用了inter(），那么它将放到字符串池中，位于PermGen中，只要应用程序运行，该字符串就会保留，这就会占用内存，可能造成OOM。
+
+    解决办法：增加PermGen的大小，-XX:MaxPermSize=512m；升级Java版本，JDK1.7后字符串池转移到了堆中。
+
+    ### 7、使用ThreadLocal造成内存泄露
+
+    使用ThreadLocal时，每个线程只要处于存货状态就可保留对其ThreadLocal变量副本的隐式调用，且将保留其自己的副本。使用不当，就会引起内存泄露。
+
+    一旦线程不在存在，ThreadLocals就应该被垃圾收集，而现在线程的创建都是使用线程池，线程池有线程重用的功能，因此线程就不会被垃圾回收器回收。所以使用到ThreadLocals来保留线程池中线程的变量副本时，ThreadLocals没有显示的删除时，就会一直保留在内存中，不会被垃圾回收。
+
+    解决办法：不在使用ThreadLocal时，调用remove()方法，该方法删除了此变量的当前线程值。不要使用ThreadLocal.set(null)，它只是查找与当前线程关联的Map并将键值对设置为当前线程为null。
+
+    #### 8、长生命周期的对象持有短生命周期的引用，就很可能会出现内存泄露
+
+    [![复制代码](https://common.cnblogs.com/images/copycode.gif)](javascript:void(0);)
+
+    ```
+    public class Test {
+        Object object;
+        public void test(){
+            object = new Object();
+            //...其他代码
+        }
+    }
+    ```
+
+    [![复制代码](https://common.cnblogs.com/images/copycode.gif)](javascript:void(0);)
+
+    这个例子中，Test类中的test方法结束后，创建出来的object所占用的内存不会马上被认为是可以被释放，严格意义上已经导致了垃圾回收。有两种解决办法：在test方法结束处，显示给object ==null，将其打上可被回收的标志；将object作为test方法内部的局部变量。
+
+    2.静态集合类像HashMap、Vector等的使用最容易出现内存泄露，这些静态变量的生命周期和应用程序一致，所有的对象Object也不能被释放，因为他们也将一直被Vector等应用着。
+
+    static Vector v = new Vector(); 
+    for (int i = 1; i<100; i++) 
+    { 
+        Object o = new Object(); 
+        v.add(o); 
+        o = null; 
+    }
+
+    在这个例子中，代码栈中存在Vector 对象的引用 v 和 Object 对象的引用 o 。在 For 循环，我们不断的生成新的对象，然后将其添加到 Vector 对象中，之后将 o 引用置空。问题是当 o 引用被置空后，如果发生 GC，我们创建的 Object 对象是否能够被 GC 回收呢？答案是否定的。因为， GC 在跟踪代码栈中的引用时，会发现 v 引用，而继续往下跟踪，就会发现 v 引用指向的内存空间中又存在指向 Object 对象的引用。也就是说尽管o 引用已经被置空，但是 Object 对象仍然存在其他的引用，是可以被访问到的，所以 GC 无法将其释放掉。如果在此循环之后， Object 对象对程序已经没有任何作用，那么我们就认为此 Java 程序发生了内存泄漏。
+
+    **3.当集合里面的对象属性被修改后，再调用remove()方法时不起作用。**
+
+    [![复制代码](https://common.cnblogs.com/images/copycode.gif)](javascript:void(0);)
+
+    ```java
+    public static void main(String[] args) 
+    { 
+        Set<Person> set = new HashSet<Person>(); 
+        Person p1 = new Person("唐僧","pwd1",25); 
+        Person p2 = new Person("孙悟空","pwd2",26); 
+        Person p3 = new Person("猪八戒","pwd3",27); 
+        set.add(p1); 
+        set.add(p2); 
+        set.add(p3); 
+        System.out.println("总共有:"+set.size()+" 个元素!"); //结果：总共有:3 个元素! 
+        p3.setAge(2); //修改p3的年龄,此时p3元素对应的hashcode值发生改变 
+        set.remove(p3); //此时remove不掉，造成内存泄漏
+        set.add(p3); //重新添加，居然添加成功 
+        System.out.println("总共有:"+set.size()+" 个元素!"); //结果：总共有:4 个元素! 
+        for (Person person : set) 
+        { 
+            System.out.println(person); 
+        } 
+    }    
+    ```
+
+    [![复制代码](https://common.cnblogs.com/images/copycode.gif)](javascript:void(0);)
+
+    **4.各种连接**，数据库连接，网络连接，IO连接等没有显示调用close关闭，不被GC回收导致内存泄露，对于Resultset 和Statement 对象可以不进行显式回收，但Connection 一定要显式回收，因为Connection 在任何时候都无法自动回收，而Connection一旦回收，Resultset 和Statement 对象就会立即为NULL；
+
+- 避免内存泄漏
+
+  - 尽早释放无用对象的引用
+  - 使用StringBuffer，避免使用String
+  - 尽量少用静态变量，因为静态变量存放在永久代（方法区）
+  - 避免在循环中创建对象
+
+- 内存溢出：程序要求的内存超出了系统所能分配的范围
+
+- 场景
+
+  - 堆内存溢出
+
+    - 堆中的内存是用来生成对象实例和数组的
+    - 例子：申请了很多内存，没释放
+
+  - 方法区内存溢出
+
+    - 方法区主要存放的是类信息、常量、静态变量等
+    - 如果程序加载的类过多，或者使用反射、cglib等这种动态代理生成类的技术，就可能导致该区发生内存溢出
+
+  - 线程栈溢出
+
+    - 线程栈发生问题必定是某个线程运行时产生的错误
+    - 一般线程栈溢出是由于递归太深或方法调用层级过多导致的
+
+  - > Jprofile exe:https://www.ej-technologies.com/download/jprofiler/version_92
+
+    
+
+- 太多份相同的对象导致 OOM
+
+  - 我们虽然清楚数据总量，但却忽略了每一份数据在内存中可能有多份
+    - 100M 的数据加载到程序内存中，变为 Java 的数据结构就已经占用了 200M 堆内存；这些数据经过 JDBC、MyBatis 等框架其实是加载了 2 份，然后领域模型、DTO 再进行转换可能又加载了 2 次；最终，占用的内存达到了 200M*4=800M。
+  - 使用 WeakHashMap 不等于不会 OOM
+    - WeakHashMap和 HashMap 的最大区别，是 Entry 对象的实现。
+    - Entry 对象继承了 WeakReference，Entry 的构造函数调用了 super (key,queue)，这是父类的构造函数。其中，key 是我们执行 put 方法时的 key；queue 是一个ReferenceQueue，被 GC 的对象会被丢进这个 queue里面。
+    - 每次调用 get、put、size 等方法时，都会从 queue 里拿出所有已经被 GC 掉的 key 并删除对应的 Entry 对象
+    - WeakHashMap 的 Key 虽然是弱引用，但是其 Value 却持有 Key 中对象的强引用，Value 被 Entry 引用，Entry 被 WeakHashMap 引用，最终导致 Key 无法回收。解决方案就是让 Value 变为弱引用
+  - Tomcat 参数配置不合理导致 OOM
+
+- > 我建议你为生产系统的程序配置 JVM 参数启用详细的 GC 日志，方便观察垃圾收集器的行为，并开启HeapDumpOnOutOfMemoryError，以便在出现 OOM 时能自动Dump 留下第一问题现场。
+  > XX:+HeapDumpOnOutOfMemoryError 
+  > -XX:HeapDumpPath=. 
+  > -XX:+PrintGCDateStamps
+  > -XX:+PrintGCDetails
+
+  
+
+  ## 2.4.1 Java堆溢出
+
+  ```java
+  import java.util.ArrayList;
+  
+  /**
+   * @Description HeapOOM
+   * @Author Zerah
+   * @Date 2019/12/20 13:04
+   *  VM args: -Xms20m -Xmx20m -XX:+HeapDumpOnOutOfMemoryError
+   */
+  public class HeapOOM {
+      static class OOMObject{
+  
+      }
+  
+      public static void main(String[] args) {
+          ArrayList<OOMObject> list = new ArrayList<>();
+          while (true){
+              list.add(new OOMObject());
+          }
+      }
+      /** 运行结果
+          java.lang.OutOfMemoryError: Java heap space
+          Dumping heap to java_pid7472.hprof ...
+          Heap dump file created [28238887 bytes in 0.175 secs]
+          Exception in thread "main" java.lang.OutOfMemoryError: Java heap space
+      **/
+  }
+  
+  
+  ```
+
+  ## 2.4.2 虚拟机栈和本地方法栈溢出
+
+  ```java
+  /**
+   * @Description JavaVMStackSOF 虚拟机栈和本地方法栈溢出OOM测试
+   * @Author Zerah
+   * @Date 2019/12/20 13:35
+   * VM args: -Xss128k
+   */
+  public class JavaVMStackSOF {
+      private int stackLength =1;
+      public void stackLeak(){
+          stackLength ++;
+          stackLeak();
+      }
+  
+      public static void main(String[] args) throws Throwable{
+          JavaVMStackSOF stackSOF = new JavaVMStackSOF();
+          try {
+              stackSOF.stackLeak();
+          } catch (Throwable e) {
+              System.out.println("stack length:"+ stackSOF.stackLength);
+              throw e;
+          }
+      }
+      /** 运行结果：
+       * stack length:1611
+       * Exception in thread "main" java.lang.StackOverflowError
+       * 	at com.zerah.concurrent.jvm.JavaVMStackSOF.stackLeak(JavaVMStackSOF.java:13)
+       * 	at com.zerah.concurrent.jvm.JavaVMStackSOF.stackLeak(JavaVMStackSOF.java:13)
+       * 	at com.zerah.concurrent.jvm.JavaVMStackSOF.stackLeak(JavaVMStackSOF.java:13)
+       * 	省略。。。。。。
+       */
+  }
+  
+  ----------
+  
+  
+  /**
+   * @Description JavaVMStackOOM 创建线程导致内存溢出异常, 别跑了，会把机子搞死机，别问我是怎么知道的，非要跑把其他软件能保存得保存下
+   * @Author Zerah
+   * @Date 2019/12/23 14:13
+   * VM args: -Xss2M
+   */
+  public class JavaVMStackOOM {
+      private void dontStop(){
+          while (true){
+  
+          }
+      }
+      public void stackLeakByThread(){
+          while (true){
+              Thread thread = new Thread(new Runnable() {
+                  @Override
+                  public void run() {
+                      dontStop();
+                  }
+              });
+              thread.start();
+          }
+      }
+  
+      public static void main(String[] args) {
+          JavaVMStackOOM oom = new JavaVMStackOOM();
+          oom.stackLeakByThread();
+      }
+  
+  }
+  
+  
+  
+  ```
+
+  ## 2.4.3 方法区和运行时常量池溢出
+
+  ```java
+  import java.util.ArrayList;
+  
+  /**
+   * @Description RuntimeConstantPoolOOM 运行时常量池导致的内存溢出异常      JDK1.6及之前版本可测试，1.6之前常量池在永久代中分配
+   * String.intern() 是一个Native方法： 如果字符串常量池中已经包含一个等于此String对象得字符串，则返回常量池中代表这个字符串得【String对象】，
+   *  否则，将此String对象包含的字符串添加到常量池中，并且返回此【String对象的引用】
+   *
+   *  如果使用JDK1.7 + 测试，如果不限制堆内存大小，while循环将一直进行下去，JDK1.7字符串常量池由永久代转移到堆中，JDK1.8之后移除永久代由元空间替代
+   *  关于元空间的测试可以看：https://blog.csdn.net/qq_16681169/article/details/70471010
+   * @Author Zerah
+   * @Date 2019/12/23 14:25
+   *
+   * VM args: -XX:PermSize=10M -XX:MaxPermSize=10M
+   * 如果限制对内存大小：-XX:PermSize=10M -XX:MaxPermSize=10M -Xmx15M
+   */
+  public class RuntimeConstantPoolOOM {
+      public static void main(String[] args) {
+          // 使用List保持着常量池的引用，避免Full GC回收常量池
+          ArrayList<String> list = new ArrayList<>();
+          // 10MB的PermSize在Integer 范围内足够产生OOM了
+          int i= 0;
+          while (true){
+              list.add(String.valueOf(i++).intern());
+          }
+      }
+  }
+  
+  
+  
+  ```
+
+  > 异常输出
+
+  ```java
+  Exception in thread "main" java.lang.OutOfMemoryError: Java heap space
+  	at java.util.Arrays.copyOf(Arrays.java:3210)
+  	at java.util.Arrays.copyOf(Arrays.java:3181)
+  	at java.util.ArrayList.grow(ArrayList.java:265)
+  	at java.util.ArrayList.ensureExplicitCapacity(ArrayList.java:239)
+  	at java.util.ArrayList.ensureCapacityInternal(ArrayList.java:231)
+  	at java.util.ArrayList.add(ArrayList.java:462)
+  	at com.zerah.concurrent.jvm.RuntimeConstantPoolOOM.main(RuntimeConstantPoolOOM.java:23)
+  Java HotSpot(TM) 64-Bit Server VM warning: ignoring option PermSize=10M; support was removed in 8.0
+  Java HotSpot(TM) 64-Bit Server VM warning: ignoring option MaxPermSize=10M; support was removed in 8.0
+  1234567891011
+  import java.lang.reflect.Method;
+  
+  --------
+  /**
+   * @Description JavaMethodAreaOOM 借助CGLib 使方法区出现内存溢出异常 JDK1.6
+   * @Author Zerah
+   * @Date 2019/12/23 15:04
+   * VM args: -XX:PermSize=10M -XX:MaxPermSize=10M
+   */
+  public class JavaMethodAreaOOM {
+      public static void main(String[] args) {
+          while (true){
+              Enhancer enhancer = new Enhancer();
+              enhancer.setSuperclass(OOMObject.class);
+              enhancer.setUseCache(false);
+              enhancer.setCallback(new MethodInterceptor() {
+                  @Override
+                  public Object intercept(Object obj, Method method, Object[] args, MethodProxy proxy) throws Throwable {
+                      return proxy.invokeSuper(obj,args);
+                  }
+              });
+              enhancer.create();
+          }
+      }
+      static class OOMObject{}
+  
+  }
+  
+  
+  ```
+
+  ## 2.4.4 本机直接内存溢出
+
+  ```java
+  import sun.misc.Unsafe;
+  
+  import java.lang.reflect.Field;
+  
+  /**
+   * @Description DirectMemorryOOM
+   * @Author Zerah
+   * @Date 2019/12/23 15:49
+   * VM args: -Xmx20M -XX:MaxDirectMemorySize=10M  如果不指定，默认与Java堆最大值（-Xmx）一样
+   */
+  public class DirectMemoryOOM {
+      private static final int _1MB = 1024*1024;
+  
+      public static void main(String[] args) throws Exception{
+          Field field = Unsafe.class.getDeclaredFields()[0];
+          field.setAccessible(true);
+          Unsafe unsafe = (Unsafe) field.get(null);
+          while (true){
+              unsafe.allocateMemory(_1MB);
+          }
+      }
+  }
+  
+  
+  Exception in thread "main" java.lang.OutOfMemoryError
+  	at sun.misc.Unsafe.allocateMemory(Native Method)
+  	at com.zerah.concur
+  
+  ```
+
+  
+
+### 一个Java内存泄漏的排查案例
+
+**某个业务系统在一段时间突然变慢**，我们怀疑是因为出现内存泄露问题导致的，于是踏上排查之路。
+
+#### 2.1 确定频繁Full GC现象
+
+首先通过“虚拟机进程状况工具：jps”找出正在运行的虚拟机进程，最主要是找出这个进程在本地虚拟机的唯一ID（LVMID，Local Virtual Machine Identifier），因为在后面的排查过程中都是需要这个LVMID来确定要监控的是哪一个虚拟机进程。  同时，对于本地虚拟机进程来说，LVMID与操作系统的进程ID（PID，Process Identifier）是一致的，使用Windows的任务管理器或Unix的ps命令也可以查询到虚拟机进程的LVMID。  jps命令格式为：  `jps [ options ] [ hostid ]`  使用命令如下：  使用jps：`jps -l`  使用ps：`ps aux | grep tomat`
+
+找到你需要监控的ID（假设为20954），再利用“虚拟机统计信息监视工具：jstat”监视虚拟机各种运行状态信息。  jstat命令格式为：  `jstat [ option vmid [interval[s|ms] [count]] ]`  使用命令如下：  `jstat -gcutil 20954 1000`  意思是每1000毫秒查询一次，一直查。gcutil的意思是已使用空间站总空间的百分比。  结果如下图：
+
+
+
+查询结果表明：这台服务器的新生代Eden区（E，表示Eden）使用了28.30%（最后）的空间，两个Survivor区（S0、S1，表示Survivor0、Survivor1）分别是0和8.93%，老年代（O，表示Old）使用了87.33%。程序运行以来共发生Minor GC（YGC，表示Young GC）101次，总耗时1.961秒，发生Full GC（FGC，表示Full GC）7次，Full GC总耗时3.022秒，总的耗时（GCT，表示GC Time）为4.983秒。
+
+#### 2.2 找出导致频繁Full GC的原因
+
+分析方法通常有两种：  1）把堆dump下来再用MAT等工具进行分析，但dump堆要花较长的时间，并且文件巨大，再从服务器上拖回本地导入工具，这个过程有些折腾，不到万不得已最好别这么干。  2）更轻量级的在线分析，使用“Java内存影像工具：jmap”生成堆转储快照（一般称为headdump或dump文件）。  jmap命令格式：  `jmap [ option ] vmid`  使用命令如下：  `jmap -histo:live 20954`  查看存活的对象情况，
+
+
+
+按照一位IT友的说法，数据不正常，十有八九就是泄露的。在我这个图上对象还是挺正常的。
+
+#### 2.3 定位到代码
+
+定位带代码，有很多种方法，比如前面提到的通过MAT查看Histogram即可找出是哪块代码。——我以前是使用这个方法。  也可以使用BTrace，我没有使用过。
+
+
+
+## 
+
+
+
 ## JVM调优案例分析与实践
 
 - 常用命令

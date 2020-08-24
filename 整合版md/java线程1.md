@@ -1976,6 +1976,429 @@ private void unparkSuccessor(Node node) {
     
     ```
 
-    
+  
+  
 
+
+
+# 高并发限流花式炫技
+
+# 1 场景
+
+> 在分布式领域当中，大型的项目都被拆分单独的众多微服务，而一个优秀的项目就是组织调用各个服务，来达到聚合用户资源，因为是分布式的，每个服务器单独部署各个微服务，这样我们就很容易水平扩展微服务的资源，比如增加服务器的数量，动态的发送请求，通过算法，发送可供选择的服务器应用，但是系统的处理能力有限，大量的请求对系统继续施压，导致服务崩溃，不可用，比如接口恶意攻击，大量的请求打到服务接口，导致该服务其他接口不能正常工作，首先想到的就是服务隔离。但是本章节主要讲的不是服务隔离，而是另一个**限流**，阻止计划之外的请求对系统继续施压。
+
+# 2 限流
+
+> 限流,除了控制流量，限流还有一个目的是控制用户行为，避免垃圾请求。比如在贴吧的用户发帖，回复，点赞等行为都要严格控制，严格限定某一行为在指定的时间内只能发生N次
+
+# 2.1 限流方案
+
+- **应用层限流**：NGINX，网关
+- **限流算法**：令牌桶、漏桶，计数器也可以进行粗暴限流实现
+
+## 2.2 应用层限流
+
+- **NGINX**
+
+> 大家都很熟悉，不仅能做轻量级的web服务器，本身也可以做负载均衡，限流
+
+服务器每天都在接受上亿次的请求,如何控制请求的单位时间内的访问？
+
+在NGINX中通过geo,map,limit_req来达到限流的目的，请看如下配置:
+
+```
+##IP白名单
+geo $whiteiplist {
+     default 1;
+     127.0.0.1 0;
+     10.0.0.0/8 0;
+  
+}
+map $whiteiplist $limit {
+     1 $limit_key;
+     0 "";
+}
+## 接口白名单
+map $uri $limit2{
+     default $limit;
+     /api/sample "";
+
+}
+limit_req_status 406;
+### 频率控制
+limit_req_zone $limit2 zone=freq_controll:100m rate=10r/s;
+limit_req_zone $limit2 zone=freq_controll_2:100m rate=500r/m;
+复制代码
+```
+
+在location中使用上面定义好的限流算法
+
+```
+location / {
+	limit_req zone=freq_controll burst=5 nodelay;
+	limit_req zone=freq_controll_2 burst=10 nodelay;
+	error_page 406 =406  @f406;
+	location @f406 {
+		access_log syslog:server=127.0.0.1:12301;
+		return 406;
+		}
+	}
+复制代码
+```
+
+注意到limit_req中两个奇怪的参数 burst ,nodelay 开始的时候我也感到疑惑,了解了背后的逻辑和算法,才理解了其中的奥义.
+
+limit_req 模块的算法属于**令牌桶算法**.可以应对某些突发的负载 而burst参数的作用是：：假设一秒内同时有120个请求发到服务器.按照传统的漏斗算法,多出的这20个请求会被直接拒绝 或者是放到队列中等待.而在令牌桶算法中又是另外一种景象了.令牌桶中实际上有100个令牌.但是允许并发10个请求.那么多出来10个请求会被拒绝.
+
+1. 在没有配置nodelay的情况下,这10个请求会被放到队列.以0.001秒的速率被取出,共计消耗0.1秒.处理110个请求用了1.1秒.实际上这个等待是没有必要的.
+2. 配置了nodelay,这多出的十个请求会被正常处理,只是burst的数量会被清空.等待令牌重新补充,才会重新接收请求.处理110个请求用了1秒.但上面的情况一样,都要等令牌补充才能接收请求.
+
+- **网关限流**
+
+> 这里所说的网关是客户端网关，具有代表性的就是zuul以及spring cloud gateway，统一入口处限流，防止各个服务器之间高频请求导致服务崩溃
+
+在spring cloud gateway当中使用**RequestRateLimiter**过滤器可以用于限流，使用RateLimiter实现来确定是否允许当前请求继续进行，如果请求太大默认会返回HTTP 429-太多请求状态。
+
+1. 在pom.xml中添加相关依赖：
+
+```
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
+</dependency>
+复制代码
+```
+
+1. 添加限流策略的配置类，这里有两种策略一种是根据请求参数中的username进行限流，另一种是根据访问IP进行限流；
+
+```
+@Configuration
+public class RedisRateLimiterConfig {
+    @Bean
+    KeyResolver userKeyResolver() {
+        return exchange -> Mono.just(exchange.getRequest().getQueryParams().getFirst("username"));
+    }
+
+    @Bean
+    public KeyResolver ipKeyResolver() {
+        return exchange -> Mono.just(exchange.getRequest().getRemoteAddress().getHostName());
+    }
+}
+复制代码
+```
+
+1. 我们使用Redis来进行限流，所以需要添加Redis和RequestRateLimiter的配置，这里对所有的GET请求都进行了按IP来限流的操作
+
+```
+server:
+  port: 9201
+spring:
+  redis:
+    host: localhost
+    password: 123456
+    port: 6379
+  cloud:
+    gateway:
+      routes:
+        - id: requestratelimiter_route
+          uri: http://localhost:8201
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 1 #每秒允许处理的请求数量
+                redis-rate-limiter.burstCapacity: 2 #每秒最大处理的请求数量
+                key-resolver: "#{@ipKeyResolver}" #限流策略，对应策略的Bean
+          predicates:
+            - Method=GET
+logging:
+  level:
+    org.springframework.cloud.gateway: debug
+复制代码
+```
+
+## 2.2 限流算法
+
+### 2.2.1 计数器
+
+> 它是限流算法中最简单最容易的一种算法，比如我们要求某一个接口，**1分钟内的请求不能超过10次**，我们可以在开始时设置一个计数器，**每次请求，该计数器+1**；如果该计数器的值大于10并且与第一次请求的时间间隔在1分钟内，那么说明请求过多，如果该请求与第一次请求的时间间隔大于1分钟，并且该计数器的值还在限流范围内，那么重置该计数器
+
+
+
+![img](https://user-gold-cdn.xitu.io/2020/6/14/172b2e65aed3b716?imageslim)
+
+
+
+手写计数器代码示例：
+
+```
+/**
+ * 功能说明: 手写计数器
+ */
+public class LimitService {
+	private int limtCount = 60;// 限制最大访问的容量
+	AtomicInteger atomicInteger = new AtomicInteger(0); // 每秒钟 实际请求的数量
+	private long start = System.currentTimeMillis();// 获取当前系统时间
+	private int interval = 60;// 间隔时间60秒
+	public boolean acquire() {
+		long newTime = System.currentTimeMillis();
+		if (newTime > (start + interval)) {
+			// 判断是否是一个周期
+			start = newTime;
+			atomicInteger.set(0); // 清理为0
+			return true;
+		}
+		atomicInteger.incrementAndGet();// i++;
+		return atomicInteger.get() <= limtCount;
+	}
+	static LimitService limitService = new LimitService();
+	public static void main(String[] args) {
+		ExecutorService newCachedThreadPool = Executors.newCachedThreadPool();
+		for (int i = 1; i < 100; i++) {
+			final int tempI = i;
+			newCachedThreadPool.execute(new Runnable() {
+				public void run() {
+					if (limitService.acquire()) {
+						System.out.println("你没有被限流,可以正常访问逻辑 i:" + tempI);
+					} else {
+						System.out.println("你已经被限流了呢  i:" + tempI);
+					}
+				}
+			});
+		}
+	}
+}
+复制代码
+```
+
+**问题**： 计数器可能产生**临界**的问题，如果大量的流量，在临界的时候聚集，比如59秒访问10个请求，61秒的时候访问10个请求。这样2秒内出现了个20个请求，这样就违背了我们设定的60秒之内允有10个请求。
+
+这个问题我们可以**采用滑动窗口方式**解决计数器临界值的问题
+
+### 2.2.2 滑动窗口计数
+
+> 滑动窗口原理:每次有访问进来时，先判断前 N 个单位时间内的总访问量是否超过了设置的阈值，并对当前时间片上的请求数 +1。
+
+滑动窗口计数有很多使用场景，比如说**限流防止系统雪崩**。相比计数实现，滑动窗口实现会更加平滑，能自动消除毛刺。
+
+滑动窗口示例：在一分钟之内分为6个格子，每个格子访问时间在10秒，每个格子中有自己的独立计数器。60秒之内只能允许1000个请求
+
+![img](https://user-gold-cdn.xitu.io/2020/6/14/172b2e65ae45ab1a?imageslim)
+
+
+
+思考：**为什么滑动窗口能够解决临界高并发问题？** 回答：因为滑动窗口是计算单位时间内走过的窗口内的请求总数，圈起来的狂口就是单位时间，这样就能控制单位时间内的请求总数
+
+### 2.2.3 令牌桶算法
+
+> 令牌桶算法是一个存放固定容量令牌的桶，按照固定速率往桶里添加令牌。
+
+**令牌桶算法原理**：假设限制2r/s，则按照500毫秒的固定速率往桶中添加令牌；桶中最多存放b个令牌，**当桶满时，新添加的令牌被丢弃或拒绝**；当一个n个字节大小的数据包到达，将从桶中删除n个令牌，接着数据包被发送到网络上；如果桶中的令牌不足n个，则不会删除令牌，且该数据包将被限流（要么丢弃，要么缓冲区等待）。
+
+
+
+
+
+![img](https://user-gold-cdn.xitu.io/2020/6/14/172b2e65af182b02?imageslim)
+
+**示例**
+
+- 使用RateLimiter实现令牌桶限流
+
+> RateLimiter是guava提供的基于令牌桶算法的实现类，可以非常简单的完成限流特技，并且根据系统的实际情况来调整生成token的速率。 通常可应用于抢购限流防止冲垮系统；限制某接口、服务单位时间内的访问量，譬如一些第三方服务会对用户访问量进行限制；限制网速，单位时间内只允许上传下载多少字节等。
+
+1. 引入guava的maven依赖。
+
+```
+<dependency>
+  <groupId>com.google.guava</groupId>
+  <artifactId>guava</artifactId>
+  <version>25.1-jre</version>
+</dependency>
+复制代码
+```
+
+1. 使用RateLimiter 实现令牌桶算法
+
+```
+@RestController
+public class IndexController {
+	@Autowired
+	private OrderService orderService;
+	// 解释：1.0 表示 每秒中生成1个令牌存放在桶中
+	RateLimiter rateLimiter = RateLimiter.create(1.0);
+	// 下单请求
+	@RequestMapping("/order")
+	public String order() {
+		// 1.限流判断
+		// 如果在500秒内 没有获取不到令牌的话，则会一直等待
+		System.out.println("生成令牌等待时间:" + rateLimiter.acquire());
+		boolean acquire = rateLimiter.tryAcquire(500, TimeUnit.MILLISECONDS);
+		if (!acquire) {
+			System.out.println("你在怎么抢，也抢不到，因为会一直等待的，你先放弃吧！");
+			return "你在怎么抢，也抢不到，因为会一直等待的，你先放弃吧！";
+		}
+		// 2.如果没有达到限流的要求,直接调用订单接口
+		boolean isOrderAdd = orderService.addOrder();
+		if (isOrderAdd) {
+			return "恭喜您,抢购成功!";
+		}
+		return "抢购失败!";
+	}
+}
+复制代码
+```
+
+这是简单的单机限流，这个也可以改造成通过注解加上AOP的方式平滑的注入接口当中 3. 封装RateLimiter
+
+- 自定义注解
+
+```
+@Target(value = ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+public @interface ExtRateLimiter {
+	double value();
+	long timeOut();
+}
+复制代码
+```
+
+- 编写AOP
+
+```
+@Aspect
+@Component
+@Slf4j
+public class RateLimiterAspect {
+
+    /**
+     * 存放接口是否已经存在
+     */
+    private static ConcurrentHashMap<String, RateLimiter> rateLimiterMap = new ConcurrentHashMap<>();
+
+    @Pointcut("@annotation(extRateLimiter)")
+    public void pointcut(ExtRateLimiter extRateLimiter) {
+
+    }
+
+    @Around(value = "pointcut(extRateLimiter)", argNames = "proceedingJoinPoint,extRateLimiter")
+    public Object doBefore(ProceedingJoinPoint proceedingJoinPoint, ExtRateLimiter extRateLimiter) throws Throwable {
+
+        // 获取配置的速率
+        double permitsPerSecond = extRateLimiter.permitsPerSecond();
+        // 获取等待令牌等待时间
+        long timeOut = extRateLimiter.timeOut();
+        RateLimiter rateLimiter = getRateLimiter(permitsPerSecond);
+        boolean acquire = rateLimiter.tryAcquire(timeOut, TimeUnit.MILLISECONDS);
+        if (acquire) {
+            return proceedingJoinPoint.proceed();
+        }
+        HttpServletUtil.write2ExceptionResult("执行降级方法,亲,服务器忙！请稍后重试!");
+        return null;
+    }
+
+    private RateLimiter getRateLimiter(double permitsPerSecond) {
+        // 获取当前URL
+        HttpServletRequest servletRequest = HttpServletUtil.getRequest();
+        String requestURI = servletRequest.getRequestURI();
+        RateLimiter rateLimiter = rateLimiterMap.get(requestURI);
+        if (ObjectUtils.isEmpty(rateLimiter)) {
+            rateLimiter = RateLimiter.create(permitsPerSecond);
+            rateLimiterMap.put(requestURI, rateLimiter);
+        }
+        return rateLimiter;
+    }
+}
+复制代码
+```
+
+- 使用示例
+
+```
+@RequestMapping("/myOrder")
+@ExtRateLimiter(value = 10.0, timeOut = 500)
+public String myOrder() throws InterruptedException {
+		System.out.println("myOrder");
+		return "SUCCESS";
+}
+复制代码
+```
+
+### 2.2.4 漏桶算法
+
+> 漏桶作为计量工具（The Leaky Bucket Algorithm as a Meter）时，可以用于流量整形（Traffic Shaping）和流量控制（TrafficPolicing）
+
+- 漏桶算法原理: 一个固定容量的漏桶，按照常量固定速率流出水滴；如果桶是空的，则不需流出水滴；可以以任意速率流入水滴到漏桶；如果流入水滴超出了桶的容量，则流入的水滴溢出了（被丢弃），而漏桶容量是不变的。
+
+
+
+![img](https://user-gold-cdn.xitu.io/2020/6/14/172b2e65afb5d3a5?imageslim)
+
+
+
+- 令牌桶和漏桶对比：
+
+1. 方式区别： **令牌桶**是按照固定速率往桶中添加令牌，请求是否被处理需要看桶中令牌是否足够，当令牌数减为零时则拒绝新的请求； **漏桶**则是按照常量固定速率流出请求，流入请求速率任意，当流入的请求数累积到漏桶容量时，则新流入的请求被拒绝；
+2. 优缺点： **令牌桶**限制的是平均流入速率（允许突发请求，只要有令牌就可以处理，支持一次拿3个令牌，4个令牌），并允许一定程度突发流量； **漏桶**限制的是常量流出速率（即流出速率是一个固定常量值，比如都是1的速率流出，而不能一次是1，下次又是2），从而平滑突发流入速率；
+
+> 注意：令牌桶允许一定程度的突发，而漏桶主要目的是平滑流入速率；
+
+- 应用场景： “漏桶算法”能够**强行限制数据的传输速率**，而“令牌桶算法”在能够限制数据的平均传输速率外，还允许某种程度的突发传输。在“令牌桶算法”中，只要令牌桶中存在令牌，那么就允许突发地传输数据直到达到用户配置的门限，因此它适合于具有**突发特性**的流量
+- 实现
+
+```
+@Slf4j
+public class LeakyBucketLimiter {
+    private ScheduledExecutorService scheduledExecutorService = Executors.newScheduledThreadPool(5);
+ 
+    // 桶的容量
+    public int capacity = 10;
+    // 当前水量
+    public int water = 0;
+    //水流速度/s
+    public int rate = 4;
+    // 最后一次加水时间
+    public long lastTime = System.currentTimeMillis();
+ 
+    public void acquire() {
+        scheduledExecutorService.scheduleWithFixedDelay(() -> {
+            long now = System.currentTimeMillis();
+            //计算当前水量
+            water = Math.max(0, (int) (water - (now - lastTime) * rate /1000));
+            int permits = (int) (Math.random() * 8) + 1;
+            log.info("请求数：" + permits + "，当前桶余量：" + (capacity - water));
+            lastTime = now;
+            if (capacity - water < permits) {
+                // 若桶满,则拒绝
+                log.info("限流了");
+            } else {
+                // 还有容量
+                water += permits;
+                log.info("剩余容量=" + (capacity - water));
+            }
+        }, 0, 500, TimeUnit.MILLISECONDS);
+    }
+ 
+    public static void main(String[] args) {
+        LeakyBucketLimiter limiter = new LeakyBucketLimiter();
+        limiter.acquire();
+    }
+}
+复制代码
+```
+
+- 运行
+
+
+
+
+
+
+
+# 3 总结
+
+> 在分布式场景，高并发大流量的实际业务中，非常有必要对接口进行限流，具体得看业务场景，选择合适的限流算法，阿里巴巴也出了限流组件，后期读者可以体验一下[Sentinel](https://github.com/alibaba/Sentinel/wiki/介绍)
+
+
+
+![img](https://user-gold-cdn.xitu.io/2020/6/14/172b2e65aefe299d?imageslim)
 
