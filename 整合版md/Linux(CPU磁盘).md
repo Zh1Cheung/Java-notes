@@ -478,9 +478,9 @@
   - 第一个维度，从 CPU 的性能指标出发。也就是说，当你要查看某个性能指标时，要清楚知道哪些工具可以做到。
     - ![img](https://upload-images.jianshu.io/upload_images/11462765-6d4f67c35d53bf18.png?imageMogr2/auto-orient/strip|imageView2/2/w/640/format/webp)
   - 第二个维度，从工具出发。也就是当你已经安装了某个工具后，要知道这个工具能提供哪些指标。
-    - ![img](https://upload-images.jianshu.io/upload_images/11462765-7d6c6ae539f628cc.png?imageMogr2/auto-orient/strip|imageView2/2/w/640/format/webp)
+    - ![img](https://img2020.cnblogs.com/blog/1896874/202008/1896874-20200811153535333-1039704810.png)
   - 为了缩小排查范围，我通常会先运行几个支持指标较多的工具，如 top、vmstat 和pidstat
-    - ![img](https://upload-images.jianshu.io/upload_images/11462765-faed248242889ff0.png?imageMogr2/auto-orient/strip|imageView2/2/w/640/format/webp)
+    - ![img](https://img2020.cnblogs.com/blog/1896874/202008/1896874-20200811160025574-1858608292.png)
   - **第一个例子，pidstat 输出的进程用户 CPU 使用率升高**，会导致 top 输出的用户 CPU 使用率升高。所以，当发现 top 输出的用户 CPU 使用率有问题时，可以跟 pidstat 的输出做对比，观察是否是某个进程导致的问题。
     - 而找出导致性能问题的进程后，就要用进程分析工具来分析进程的行为，比如使用 strace 分析系统调用情况，以及使用 perf 分析调用链中各级函数的执行情况。
   - **第二个例子，top 输出的平均负载升高**，可以跟 vmstat 输出的运行状态和不可中断状态的进程数做对比，观察是哪种进程导致的负载升高。

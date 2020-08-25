@@ -277,8 +277,8 @@
 
 - **内存性能工具**
 
-  - ![img](https://upload-images.jianshu.io/upload_images/315466-0c91bdfb4819a104.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1200/format/webp)
-  - ![img](https://upload-images.jianshu.io/upload_images/315466-3a25544b244b3f1c.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1200/format/webp)
+  - ![img](https://img2018.cnblogs.com/blog/1075436/201905/1075436-20190510153449496-214029835.png)
+  - ![img](https://img2018.cnblogs.com/blog/1075436/201905/1075436-20190510153515384-1920005016.png)
 
   
 
@@ -289,7 +289,7 @@
       1. 先用 free 和 top，查看系统整体的内存使用情况。 
       2. 再用 vmstat 和 pidstat，查看一段时间的趋势，从而判断出内存问题的类型。 
       3. 最后进行详细分析，比如内存分配分析、缓存 / 缓冲区分析、具体进程的内存使用分析等。 
-    - ![img](https://upload-images.jianshu.io/upload_images/315466-ae55df93100f4fb9.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1200/format/webp)
+    - ![img](https://img2018.cnblogs.com/blog/1075436/201905/1075436-20190510153550118-342346961.png)
   - 当你通过 free，发现大部分内存都被缓存占用后，可以使用 vmstat 或者 sar观察一下缓存的变化趋势，确认缓存的使用是否还在继续增大
     - 如果继续增大，则说明导致缓存升高的进程还在运行，那你就能用缓存 / 缓冲区分析工具（比如 cachetop、slabtop 等），分析这些缓存到底被哪里占用。
   - 当你 free 一下，发现系统可用内存不足时，首先要确认内存是否被缓存 / 缓冲区占用。
