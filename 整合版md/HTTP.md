@@ -81,7 +81,11 @@
 
   - HTTP 协议的传输过程就是这样通过协议栈逐层向下，每一层都添加本层的专有数据，层层打包，然后通过下层发送出去。
 
+![OSI七层协议模型、TCP/IP四层模型学习笔记](https://s4.51cto.com/images/blog/201806/19/eb5a8f1811f634f1cc1fe5684ecdb7eb.png?x-oss-process=image/watermark,size_16,text_QDUxQ1RP5Y2a5a6i,color_FFFFFF,t_100,g_se,x_10,y_10,shadow_90,type_ZmFuZ3poZW5naGVpdGk=)
 
+![OSI七层协议模型、TCP/IP四层模型学习笔记](https://s4.51cto.com/images/blog/201806/19/d754f1060a2390637b4a013c1925079b.png?x-oss-process=image/watermark,size_16,text_QDUxQ1RP5Y2a5a6i,color_FFFFFF,t_100,g_se,x_10,y_10,shadow_90,type_ZmFuZ3poZW5naGVpdGk=)
+
+![OSI七层协议模型、TCP/IP四层模型学习笔记](https://s4.51cto.com/images/blog/201806/19/27f893d336d5ac31f5e2495d6ec4b57f.png?x-oss-process=image/watermark,size_16,text_QDUxQ1RP5Y2a5a6i,color_FFFFFF,t_100,g_se,x_10,y_10,shadow_90,type_ZmFuZ3poZW5naGVpdGk=)
 
 
 
