@@ -120,6 +120,104 @@ Redis高并发快总结
 
 
 
+## redis的过期时间和过期删除机制
+
+redis有四种命令可以用于设置键的生存时间和过期时间：
+
+
+
+```xml
+EXPIRE <KEY> <TTL> : 将键的生存时间设为 ttl 秒
+  PEXPIRE <KEY> <TTL> :将键的生存时间设为 ttl 毫秒
+  EXPIREAT <KEY> <timestamp> :将键的过期时间设为 timestamp 所指定的秒数时间戳
+  PEXPIREAT <KEY> <timestamp>: 将键的过期时间设为 timestamp 所指定的毫秒数时间戳.
+```
+
+- 保存过期时间
+
+在数据库结构redisDb中的expires字典中保存了数据库中所有键的过期时间，我们称expire这个字典为过期字典。
+ （1）过期字典是一个指针，指向键空间的某个键对象。
+ （2）过期字典的值是一个longlong类型的整数，这个整数保存了键所指向的数据库键的过期时间–一个毫秒级的 UNIX 时间戳。
+
+- 移除过期时间
+
+  - ```css
+    127.0.0.1:6379> set message "hello"
+    OK
+    127.0.0.1:6379> expire message 60
+    (integer) 1
+    127.0.0.1:6379> ttl message
+    (integer) 54
+    127.0.0.1:6379> persist message
+    (integer) 1
+    127.0.0.1:6379> ttl message
+    (integer) -1
+    ```
+
+  persist命令就是expire命令的反命令，这个函数在过期字典中查找给定的键,并从过期字典中移除。
+
+- 计算并返回剩余生存时间
+
+  - ttl命令以秒为单位返回指定键的剩余生存时间。pttl以毫秒返回。两个命令都是通过计算当前时间和过期时间的差值得到剩余生存期的。
+
+  - ```css
+    127.0.0.1:6379> set minping shuxin
+    OK
+    127.0.0.1:6379> expire minping 60
+    (integer) 1
+    127.0.0.1:6379> ttl minping
+    (integer) 57
+    127.0.0.1:6379> ttl minping
+    (integer) 27
+    127.0.0.1:6379> pttl minping
+    (integer) 23839
+    127.0.0.1:6379>
+    ```
+
+  - ```swift
+    void ttlCommand(redisClient *c) {
+        ttlGenericCommand(c, 0);
+    }
+    void pttlCommand(redisClient *c) {
+        ttlGenericCommand(c, 1);
+    }
+    void ttlGenericCommand(redisClient *c, int output_ms) {
+        long long expire, ttl = -1;
+        /* 如果键不存在,返回-2 */
+        if (lookupKeyRead(c->db,c->argv[1]) == NULL) {
+            addReplyLongLong(c,-2);
+            return;
+        }
+        
+        /* 如果键存在*/
+        /*如果没有设置生存时间,返回 -1, 否则返回实际剩余时间 */
+        expire = getExpire(c->db,c->argv[1]);
+        if (expire != -1) {
+            /* 过期时间减去当前时间,就是键的剩余时间*/
+            ttl = expire-mstime();
+            if (ttl < 0) ttl = 0;
+        }
+        if (ttl == -1) {
+            addReplyLongLong(c,-1);
+        } else {
+             /*将毫秒转化为秒*/
+            addReplyLongLong(c,output_ms ? ttl : ((ttl+500)/1000));
+        }
+    }
+    ```
+
+- 过期键的删除策略
+
+  如果一个键是过期的，那它到了过期时间之后是不是马上就从内存中被被删除呢？？如果不是，那过期后到底什么时候被删除呢？？
+
+  其实有三种不同的删除策略：
+   （1）：立即删除。在设置键的过期时间时，创建一个回调事件，当过期时间达到时，由时间处理器自动执行键的删除操作。
+   （2）：惰性删除。键过期了就过期了，不管。每次从dict字典中按key取值时，先检查此key是否已经过期，如果过期了就删除它，并返回nil，如果没过期，就返回键值。
+   （3）：定时删除。每隔一段时间，对expires字典进行检查，删除里面的过期键。
+   可以看到，第二种为被动删除，第一种和第三种为主动删除，且第一种实时性更高。下面对这三种删除策略进行具体分析。
+
+
+
 ## 应用场景
 
 - 数据高速缓存,web会话缓存（Session Cache）
