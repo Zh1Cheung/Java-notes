@@ -434,6 +434,48 @@ List<? extendsPerson>表示该list集合中存放的都是Person的子类型（�
 
 ## JDK中注解的底层实现
 
+-  注解的应用
+
+    在源程序中，调用一个类，这个类会用到注解，需要先准备好注解类，类在调用注解类的对象。注解类的写法类似接口，@interface。先写好注解类A，将注解放在类B中，类C在调用类B时通过反射获得注解类A的内容，进而明确该做什么、不该做什么。可以加上多个注解，加上的实际是**注解类的对象**：@interfaceA。
+
+    main()方法必须放在一个类下，但与这个类不一定有所属关系。
+
+    **在注解类A上加注解B，这个注解B只为这个注解类A服务，B称为“元注解”。**类似的还有元信息、元数据。元注解有2个：Rentention和Target。对注解类的注解，可以理解为注解类的属性。
+
+    
+
+   
+
+- Rentention注解类
+
+    注解的生命周期：Java源文件—》class文件—》内存中的字节码。编译或者运行时，都有可能会取消注解。**Rentention的3种取值意味让注解保留到哪个阶段**，RententionPolicy.SOURCE、RententionPolicy.CLASS(默认值)、RententionPolicy.RUNTIME。
+
+    @Override、@SuppressWarnings是默认保留到SOURCE阶段；@Deprecated是保留到RUNTIME阶段。
+
+    Rentention相当于注解类的一个属性，因为Rentention的值不同，注解类保留到的阶段不同。注解类内部Rentention的值使用value表示，例如，@Deprecated中，value=Runtime。
+
+    **Rentention的值是枚举RententionPolicy的值**，只有3个：SOURCE、CLASS、RUNTIME。
+
+  > `RetentionPolicy.SOURCE`:这种类型的`Annotations`只在源代码级别保留,编译时就会被忽略,在`class`字节码文件中不包含。
+  > `RetentionPolicy.CLASS`:这种类型的`Annotations`编译时被保留,默认的保留策略,在`class`文件中存在,但`JVM`将会忽略,运行时无法获得。
+  > `RetentionPolicy.RUNTIME`:这种类型的`Annotations`将被`JVM`保留,所以他们能在运行时被`JVM`或其他使用反射机制的代码所读取和使用。
+  > `@Document`：说明该注解将被包含在`javadoc`中
+  > `@Inherited`：说明子类可以继承父类中的该注解
+
+   
+
+- Target注解类
+
+    性质和Rentention一样，都是注解类的属性，**表示注解类应该在什么位置**，对那一块的数据有效。例如，@Target(ElementType.*METHOD*)
+
+  **Target内部的值使用枚举ElementType表示**，表示的主要位置有：注解、构造方法、属性、局部变量、函数、包、参数和类(默认值)。多个位置使用数组，例如，@Target({ElementType.*METHOD*,ElementType.*TYPE*})。
+
+  类、接口、枚举、注解这一类事物用TYPE表示，Class的父类，JDK1.5的新特性。
+
+  > `@Target(ElementType.TYPE)`——接口、类、枚举、注解
+  > `@Target(ElementType.FIELD)`——字段、枚举的常量
+  > `@Target(ElementType.METHOD)`——方法
+
 - 我们先定义一个十分简单的Counter注解
 
   - ```java
@@ -967,6 +1009,32 @@ List<? extendsPerson>表示该list集合中存放的都是Person的子类型（�
       - 如果 `(e.hash & oldCap) == 1` 则该节点在新表的下标位置 `j + oldCap` 
       - 根据这个条件, 我们将原位置的链表拆分成两个链表, 然后一次性将整个链表放到新的Table对应的位置上.
 
+- HashMap 的初始化
+
+  - 当初始化是构造函数指定 1w 时，后续我们立即存入 1w 条数据，是否符合与其不会触发扩容呢
+- 在 HashMap 中，提供了一个指定初始容量的构造方法 `HashMap(int initialCapacity)`，这个方法最终会调用到 HashMap 另一个构造方法，其中的参数 loadFactor 就是默认值 0.75f。
+    - 其中的成员变量 `threshold` 就是用来存储，触发 HashMap 扩容的阈值，也就是说，当 HashMap 存储的数据量达到 `threshold` 时，就会触发扩容。
+  - 从构造方法的逻辑可以看出，HashMap 并不是直接使用外部传递进来的 `initialCapacity`，而是经过了 `tableSizeFor()` 方法的处理，再赋值到 `threshole` 上。
+    - 在 `tableSizeFor()` 方法中，通过逐步位运算，就可以让返回值，保持在 2 的 N 次幂。以方便在扩容的时候，快速计算数据在扩容后的新表中的位置。
+    - 那么当我们从外部传递进来 1w 时，实际上经过 `tableSizeFor()` 方法处理之后，就会变成 2 的 14 次幂 16384，再算上负载因子 0.75f，实际在不触发扩容的前提下，可存储的数据容量是 12288（16384 * 0.75f）。
+    - 这种场景下，用来存放 1w 条数据，绰绰有余了，并不会触发我们猜想的扩容。
+  - 当我们把初始容量，调整到 1000 时
+    - 在 HashMap 中，动态扩容的逻辑在 `resize()` 方法中。这个方法不仅仅承担了 table 的扩容，它还承担了 table 的初始化。
+      - **table.size == threshold \* loadFactor**
+      - 上边的put方法、resize方法。
+        - 在 `resize()` 方法中，调整了最终 `threshold` 值，以及完成了 table 的初始化。
+      - 虽然 HashMap 初始容量指定为 1000，会被 `tableSizeFor()` 调整为 1024，但是它只是表示 table 数组为 1024，扩容的重要依据扩容阈值会在 `resize()` 中调整为 768（1024 * 0.75）。
+      - 它是不足以承载 1000 条数据的，最终在存够 1k 条数据之前，还会触发一次动态扩容。
+  - 通常在初始化 HashMap 时，初始容量都是根据业务来的，而不会是一个固定值，为此我们需要有一个特殊处理的方式，就是将预期的初始容量，再除以 HashMap 的装载因子，默认时就是除以 0.75。
+    - 例如想要用 HashMap 存放 1k 条数据，应该设置 1000 / 0.75，实际传递进去的值是 1333，然后会被 `tableSizeFor()` 方法调整到 2048，足够存储数据而不会触发扩容。
+    - 当想用 HashMap 存放 1w 条数据时，依然设置 10000 / 0.75，实际传递进去的值是 13333，会被调整到 16384，和我们直接传递 10000 效果是一样的。
+  - 最后我们再总结一下：
+    1. HashMap 构造方法传递的 initialCapacity，虽然在处理后被存入了 loadFactor 中，但它实际表示 table 的容量。
+    2. 构造方法传递的 initialCapacity，最终会被 `tableSizeFor()` 方法动态调整为 2 的 N 次幂，以方便在扩容的时候，计算数据在 newTable 中的位置。
+    3. 如果设置了 table 的初始容量，会在初始化 table 时，将扩容阈值 threshold 重新调整为 table.size * loadFactor。
+    4. **HashMap 是否扩容，由 threshold 决定，而 threshold 又由初始容量和 loadFactor 决定。**
+    5. 如果我们预先知道 HashMap 数据量范围，可以预设 HashMap 的容量值来提升效率，但是需要注意要考虑装载因子的影响，才能保证不会触发预期之外的动态扩容。
+  
 - 头插法导致的死循环
 
   - 老版本HashMap扩容代码，其中，重点在于transfer()
@@ -1076,7 +1144,7 @@ List<? extendsPerson>表示该list集合中存放的都是Person的子类型（�
   - 自然排序：TreeMap的所有key必须实现Comparable接口，所有的key都是同一个类的对象
   - 定制排序：创建TreeMap对象传入了一个Comparator对象，该对象负责对TreeMap中所有的key进行排序，采用定制排序不要求Map的key实现Comparable接口
   - 默认排序方式：对key升序排序。
-- 二叉-查找树
+- **二叉-查找树**
   - 概念
     - 若任意节点的左子树不空，则左子树上所有结点的值均小于它的根结点的值；
     - 若任意节点的右子树不空，则右子树上所有结点的值均大于它的根结点的值；
@@ -1087,7 +1155,7 @@ List<? extendsPerson>表示该list集合中存放的都是Person的子类型（�
     - 如果删除的是叶节点，可以直接删除；
     - 如果被删除的元素有一个子节点，可以将子节点直接移到被删除元素的位置；
     - 如果有两个子节点，这时候就采用中序遍历，找到待删除的节点的后继节点，将其与待删除的节点互换，此时待删除节点的位置已经是叶子节点，可以直接删除
-- 平衡二叉树
+- **平衡二叉树**
   - 它是一棵空树或它的左右两个子树的高度差的绝对值不超过1，并且左右两个子树都是一棵平衡二叉树
   - 在构建一棵平衡二叉树的过程中，当有新的节点要插入时，检查是否因插入后而破坏了树的平衡，如果是，则需要做旋转去改变树的结构
   - 旋转
@@ -1104,8 +1172,219 @@ List<? extendsPerson>表示该list集合中存放的都是Person的子类型（�
       - 然后再对左左进行调整，从而使得二叉树平衡
       - 先左旋再右旋
     - 左右跟右左互为镜像，左左跟右右也互为镜像
-- 平衡二叉树（AVL树）
+- **平衡二叉树（AVL树）**
   - 平衡二叉树(Balance Binary Tree)又称AVL树。它或者是一颗空树，或者是具有下列性质的二叉树：它的左子树和右子树都是平衡二叉树，且左子树和右子树的深度之差的绝对值不超过1。
+
+- **最小生成树**
+
+  - 关于图的几个概念定义：
+
+    - **连通图**：在无向图中，若任意两个顶点vivi与vjvj都有路径相通，则称该无向图为连通图。
+    - **强连通图**：在有向图中，若任意两个顶点vivi与vjvj都有路径相通，则称该有向图为强连通图。
+    - **连通网**：在连通图中，若图的边具有一定的意义，每一条边都对应着一个数，称为权；权代表着连接连个顶点的代价，称这种连通图叫做连通网。
+    - **生成树**：一个连通图的生成树是指一个连通子图，它含有图中全部n个顶点，但只有足以构成一棵树的n-1条边。一颗有n个顶点的生成树有且仅有n-1条边，如果生成树中再添加一条边，则必定成环。
+    - **最小生成树**：在连通网的所有生成树中，所有边的代价和最小的生成树，称为最小生成树。
+      ![这里写图片描述](https://img-blog.csdn.net/20160714130435508)
+
+    ------
+
+    下面介绍两种求最小生成树算法
+
+    ## **1.Kruskal算法**
+
+    此算法可以称为“加边法”，初始最小生成树边数为0，每迭代一次就选择一条满足条件的最小代价边，加入到最小生成树的边集合里。
+    \1. 把图中的所有边按代价从小到大排序；
+    \2. 把图中的n个顶点看成独立的n棵树组成的森林；
+    \3. 按权值从小到大选择边，所选的边连接的两个顶点ui,viui,vi,应属于两颗不同的树，则成为最小生成树的一条边，并将这两颗树合并作为一颗树。
+    \4. 重复(3),直到所有顶点都在一颗树内或者有n-1条边为止。
+
+    ![这里写图片描述](https://img-blog.csdn.net/20160714144315409)
+
+    ## **2.Prim算法**
+
+    此算法可以称为“加点法”，每次迭代选择代价最小的边对应的点，加入到最小生成树中。算法从某一个顶点s开始，逐渐长大覆盖整个连通网的所有顶点。
+
+    1. 图的所有顶点集合为VV；初始令集合u={s},v=V−uu={s},v=V−u;
+    2. 在两个集合u,vu,v能够组成的边中，选择一条代价最小的边(u0,v0)(u0,v0)，加入到最小生成树中，并把v0v0并入到集合u中。
+    3. 重复上述步骤，直到最小生成树有n-1条边或者n个顶点为止。
+
+    由于不断向集合u中加点，所以最小代价边必须同步更新；需要建立一个辅助数组closedge,用来维护集合v中每个顶点与集合u中最小代价边信息，：
+
+    ```
+    struct
+    {
+      char vertexData   //表示u中顶点信息
+      UINT lowestcost   //最小代价
+    }closedge[vexCounts]12345
+    ```
+
+    ![这里写图片描述](https://img-blog.csdn.net/20160714161107576)
+
+    ------
+
+    ## **3.完整代码**
+
+    ```c
+    
+    #include <iostream>
+    #include <vector>
+    #include <queue>
+    #include <algorithm>
+    using namespace std;
+    #define INFINITE 0xFFFFFFFF   
+    #define VertexData unsigned int  //顶点数据
+    #define UINT  unsigned int
+    #define vexCounts 6  //顶点数量
+    char vextex[] = { 'A', 'B', 'C', 'D', 'E', 'F' };
+    struct node 
+    {
+        VertexData data;
+        unsigned int lowestcost;
+    }closedge[vexCounts]; //Prim算法中的辅助信息
+    typedef struct 
+    {
+        VertexData u;
+        VertexData v;
+        unsigned int cost;  //边的代价
+    }Arc;  //原始图的边信息
+    void AdjMatrix(unsigned int adjMat[][vexCounts])  //邻接矩阵表示法
+    {
+        for (int i = 0; i < vexCounts; i++)   //初始化邻接矩阵
+            for (int j = 0; j < vexCounts; j++)
+            {
+                adjMat[i][j] = INFINITE;
+            }
+        adjMat[0][1] = 6; adjMat[0][2] = 1; adjMat[0][3] = 5;
+        adjMat[1][0] = 6; adjMat[1][2] = 5; adjMat[1][4] = 3;
+        adjMat[2][0] = 1; adjMat[2][1] = 5; adjMat[2][3] = 5; adjMat[2][4] = 6; adjMat[2][5] = 4;
+        adjMat[3][0] = 5; adjMat[3][2] = 5; adjMat[3][5] = 2;
+        adjMat[4][1] = 3; adjMat[4][2] = 6; adjMat[4][5] = 6;
+        adjMat[5][2] = 4; adjMat[5][3] = 2; adjMat[5][4] = 6;
+    }
+    int Minmum(struct node * closedge)  //返回最小代价边
+    {
+        unsigned int min = INFINITE;
+        int index = -1;
+        for (int i = 0; i < vexCounts;i++)
+        {
+            if (closedge[i].lowestcost < min && closedge[i].lowestcost !=0)
+            {
+                min = closedge[i].lowestcost;
+                index = i;
+            }
+        }
+        return index;
+    }
+    void MiniSpanTree_Prim(unsigned int adjMat[][vexCounts], VertexData s)
+    {
+        for (int i = 0; i < vexCounts;i++)
+        {
+            closedge[i].lowestcost = INFINITE;
+        }      
+        closedge[s].data = s;      //从顶点s开始
+        closedge[s].lowestcost = 0;
+        for (int i = 0; i < vexCounts;i++)  //初始化辅助数组
+        {
+            if (i != s)
+            {
+                closedge[i].data = s;
+                closedge[i].lowestcost = adjMat[s][i];
+            }
+        }
+        for (int e = 1; e <= vexCounts -1; e++)  //n-1条边时退出
+        {
+            int k = Minmum(closedge);  //选择最小代价边
+            cout << vextex[closedge[k].data] << "--" << vextex[k] << endl;//加入到最小生成树
+            closedge[k].lowestcost = 0; //代价置为0
+            for (int i = 0; i < vexCounts;i++)  //更新v中顶点最小代价边信息
+            {
+                if ( adjMat[k][i] < closedge[i].lowestcost)
+                {
+                    closedge[i].data = k;
+                    closedge[i].lowestcost = adjMat[k][i];
+                }
+            }
+        }
+    }
+    void ReadArc(unsigned int  adjMat[][vexCounts],vector<Arc> &vertexArc) //保存图的边代价信息
+    {
+        Arc * temp = NULL;
+        for (unsigned int i = 0; i < vexCounts;i++)
+        {
+            for (unsigned int j = 0; j < i; j++)
+            {
+                if (adjMat[i][j]!=INFINITE)
+                {
+                    temp = new Arc;
+                    temp->u = i;
+                    temp->v = j;
+                    temp->cost = adjMat[i][j];
+                    vertexArc.push_back(*temp);
+                }
+            }
+        }
+    }
+    bool compare(Arc  A, Arc  B)
+    {
+        return A.cost < B.cost ? true : false;
+    }
+    bool FindTree(VertexData u, VertexData v,vector<vector<VertexData> > &Tree)
+    {
+        unsigned int index_u = INFINITE;
+        unsigned int index_v = INFINITE;
+        for (unsigned int i = 0; i < Tree.size();i++)  //检查u,v分别属于哪颗树
+        {
+            if (find(Tree[i].begin(), Tree[i].end(), u) != Tree[i].end())
+                index_u = i;
+            if (find(Tree[i].begin(), Tree[i].end(), v) != Tree[i].end())
+                index_v = i;
+        }
+    
+        if (index_u != index_v)   //u,v不在一颗树上，合并两颗树
+        {
+            for (unsigned int i = 0; i < Tree[index_v].size();i++)
+            {
+                Tree[index_u].push_back(Tree[index_v][i]);
+            }
+            Tree[index_v].clear();
+            return true;
+        }
+        return false;
+    }
+    void MiniSpanTree_Kruskal(unsigned int adjMat[][vexCounts])
+    {
+        vector<Arc> vertexArc;
+        ReadArc(adjMat, vertexArc);//读取边信息
+        sort(vertexArc.begin(), vertexArc.end(), compare);//边按从小到大排序
+        vector<vector<VertexData> > Tree(vexCounts); //6棵独立树
+        for (unsigned int i = 0; i < vexCounts; i++)
+        {
+            Tree[i].push_back(i);  //初始化6棵独立树的信息
+        }
+        for (unsigned int i = 0; i < vertexArc.size(); i++)//依次从小到大取最小代价边
+        {
+            VertexData u = vertexArc[i].u;  
+            VertexData v = vertexArc[i].v;
+            if (FindTree(u, v, Tree))//检查此边的两个顶点是否在一颗树内
+            {
+                cout << vextex[u] << "---" << vextex[v] << endl;//把此边加入到最小生成树中
+            }   
+        }
+    }
+    
+    int main()
+    {
+        unsigned int  adjMat[vexCounts][vexCounts] = { 0 };
+        AdjMatrix(adjMat);   //邻接矩阵
+        cout << "Prim :" << endl;
+        MiniSpanTree_Prim(adjMat,0); //Prim算法，从顶点0开始.
+        cout << "-------------" << endl << "Kruskal:" << endl;
+        MiniSpanTree_Kruskal(adjMat);//Kruskal算法
+        return 0;
+    }
+    ```
+
+
 
 
 

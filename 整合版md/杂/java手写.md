@@ -901,6 +901,314 @@ public class HandMakeCache {
 
 
 
+
+
+## 多线程下的LRU缓存算法
+
+思路：
+链表：插入到合适的位置,不需要数据的移动
+HashMap:直接根据文章的id获取ArticleBean对象。
+假设：
+如果将数据分别保存到链表和HashMap中，那么数据保存了两份，占用了两份内存，在内存宝贵的情况下这样是不行的。
+所以：
+将ArticleBean转化为一个节点Entry，在节点中保存ArticleBean作为value、前一个节点，后一个节点，key作为键值。
+好处：
+1.保存在HashMap可以直接定位节点的位置
+2.用节点连接起来又可以直接插入节点
+3.每个节点在缓存中只有这一份
+
+多线程：
+用读写锁来实现多线程下的安全，当增加、移动、删除的时候用写锁，而查阅的时候用读锁。
+
+
+
+```java
+
+import java.util.HashMap;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+public class MyLRU<K,V> {
+    private int cacheSize;//缓存的长度
+    private HashMap<K, Entry<K,V>> nodes;//缓存容器，node的建其实就是Entry的键
+    private int currentSize;//缓存中的元素长度
+    private Entry<K,V> head;//链表的头部
+    private Entry<K,V> tail;//链表的尾部
+
+    /*
+     * 该类对象，保证该类对象在服务器上只有一份。
+     */
+    private static MyLRU instance;
+    private static ReadWriteLock rwl = new ReentrantReadWriteLock();//用于修改缓存中数据的读写锁
+    private static ReadWriteLock rwlInstance = new ReentrantReadWriteLock();//用于创建对象的读写锁
+
+    /*
+     * 虽然getLruThread(..)方法中加了rwl.writeLock().lock();，为了以防万一，该方法中也要加锁。
+     * 这样不会造成死锁，属于可重入锁，这两个锁的对象是相同的，就不会重新申请锁了。
+     */
+    private MyLRU(int cacheSize){
+        rwlInstance.writeLock().lock();
+        try{
+            this.cacheSize = cacheSize;
+            currentSize = 0;
+            nodes = new HashMap<K,Entry<K,V>>(cacheSize);//根据提供的参数初始化容器初始化容器
+        }finally{
+            rwlInstance.writeLock().unlock();
+        }
+    }
+
+    public static MyLRU getLruThread(){
+        return getLruThread(16);
+    }
+
+    public static MyLRU getLruThread(int cacheSize){
+        //多个线程可以同时去读这个对象，
+        rwl.readLock().lock();;
+        try{
+            /*
+             * 如果这个对象是空的，那么就关闭这个read锁，打开写锁，去获取这个对象
+             */
+            if(instance == null){
+                rwl.readLock().unlock();//关闭读锁
+                rwlInstance.writeLock().lock();;//打开写锁
+
+                /*
+                 * 再次判断instance对象是否为空
+                 * 在多线程情况下，当多个线程同时读数据，发现instance是null，则read锁关闭，写锁打开，只有一个线程进来了，
+                 * 获取到对象后，写锁关闭，等待在外面的线程就依次获取到这个写锁，进来，如果不做判断，还会重新获取数据，这样显然没有必要。
+                 * 所以必须要加这个判断。
+                 */
+                if(instance == null){
+                    //获取instance对象
+                    instance = new MyLRU(cacheSize);
+                }
+                /*
+                 * 这两行的顺序无所谓，因为写锁中可以去读数据，写锁锁住的情况下说明只有当前线程持有该锁，
+                 * 其他线程不能去读，也不能去写，读数据不会引起并发，所以可以写中读。
+                 * 
+                 * 但是读锁中不能打开写锁，如果读锁中有写锁，那么写锁会修改数据，而此时多个线程在同时读数据，那么就会出现并发问题
+                 */
+                rwl.readLock().lock();//打开读锁
+                rwlInstance.writeLock().unlock();;//关闭写锁
+                return instance;
+
+            }
+        }finally{
+            rwl.readLock().unlock();//关闭读锁
+        }
+        return instance;
+    }
+
+    public Entry<K, V> get(K key){
+        rwl.readLock().lock();
+        try{
+            Entry<K,V> node = nodes.get(key);
+            /*
+             * 为什么得到了这个节点，就把这个节点移动到链表的头部呢？
+             */
+            if (node != null) {
+                rwl.readLock().unlock();
+                rwl.writeLock().lock();
+                //打开写锁的目的就是将获取到的节点移动到链表的头部，如果节点就在链表的头部，那么就没必要移动了。
+                if (node != head) {
+                    moveToHead(node);
+                }
+                rwl.writeLock().unlock();
+                rwl.readLock().lock();
+                return node;
+            }else{
+                return null;
+            }
+        }finally{
+            rwl.readLock().unlock();
+        }
+    }
+
+    //将内容添加到节点的最头部
+    public void put(K key, V value){
+        rwl.writeLock().lock();
+        try{
+            Entry<K, V> nd =  nodes.get(key);
+
+            if (nd == null) {
+                //判断缓存容器的大小
+                //容器空的时候
+                if (currentSize == 0) {
+                    nd = new Entry<K,V>(tail,null,key,value);
+                    head = nd;//让该节点成为头节点
+                    tail = nd;//让该节点成为尾节点
+                    currentSize++;
+                }else if (cacheSize == currentSize) {//容器满的时候
+                    //因为尾节点的点击量最小，所以要将尾节点从链表中移除
+                    nodes.remove(tail.key);//HashMap中移除链表的尾节点
+                    removeLast();//移除最后一个
+                    nd = new Entry<K,V>(tail,null,key,value);
+                }else{
+                    //实际长度加1
+                    currentSize++;
+                    nd = new Entry<K,V>(tail,null,key,value);
+                }
+            }else{
+                nd.value = value;//覆盖节点中的值
+            }
+
+            //将节点移动到缓存链的最前面
+            moveToHead(nd);
+            //将节点加入到缓存中
+            nodes.put(key, nd);
+        }finally{
+            rwl.writeLock().unlock();
+        }
+    }
+
+    //根据key值删除数据，该数据只在链满的时候才删除。
+    //删除链表中的数据，只用将链表前后两个节点连接就好
+    public void remove(K key){
+        rwl.writeLock().lock();
+        try{
+            Entry<K, V> node = nodes.get(key);
+            if (node != null) {
+                if (node == head) {
+                    head.next.pre = null;
+                    head = node.next;
+                }
+                if (node == tail) {
+                    tail.pre.next = null;
+                    tail = tail.pre;
+                }
+                if (node.pre != null) {
+                    node.pre.next = node.next;
+                }
+                if (node.next != null) {
+                    node.next.pre = node.pre;
+                }
+                node = null;
+            }
+
+            nodes.remove(key);//删除hashtable中的链
+        }finally{
+            rwl.writeLock().unlock();
+        }
+    }
+
+    //移除双向链表的尾节点
+    private void removeLast() {
+        rwl.writeLock().lock();
+        try{
+            if (tail != null) {
+                //判断链表是不是只有一个节点
+                if (tail.pre == null) {
+                    head = null;
+                }else{
+                    tail.pre.next = null;
+                }
+                tail = tail.pre;
+            }
+        }finally{
+            rwl.writeLock().unlock();
+        }
+    }
+
+    //输出双链中的内容
+    public void sop(){
+        rwl.readLock().lock();
+        try{
+            for (Entry<K, V> node = head; node != null; node = node.next) {
+                System.out.println("[" + node.key + " = " + node.value + "]");
+            }
+        }finally{
+            rwl.readLock().unlock();
+        }
+    }
+
+    //将节点移动到最前面
+    private void moveToHead(Entry<K, V> node) {
+        rwl.writeLock().lock();
+        try{
+            //node节点就是头结点
+            if(node == head){
+                return;
+            }
+            //node节点是最后一个节点
+            if (node == tail) {
+                //让node的前一个节点的next指向null，并让前一个节点变为tail。
+                node.pre.next = null;
+                tail = node.pre;
+            }
+            //node节点前面有元素
+            if (node.pre != null) {
+                //更改node的前一个节点的next的指向
+                node.pre.next = node.next;
+            }
+            //node前面有元素
+            if (node.next != null) {
+                //更改node的下一个节点的pre的指向
+                node.next.pre = node.pre;
+            }
+            //将node节点变为头结点
+            if (null != head) {
+                node.next = head;
+                head.pre = node;
+            }
+
+            node.pre = null;
+            head = node;
+            //只有一个节点
+            if (tail == null) {
+                tail = node;
+            }
+        }finally{
+            rwl.writeLock().unlock();
+        }
+    }
+
+    public int size(){
+        rwl.readLock().lock();
+        try{
+            return currentSize;     
+        }finally{
+            rwl.readLock().unlock();
+        }
+    }
+
+    public void clear(){
+        rwl.writeLock().lock();
+        try{
+            if (head != tail) {
+                Entry<K, V> node = head;
+                while (node != null) {
+                    node.value = null;
+                    node.pre = null;
+                    node = node.next;
+                }
+
+                currentSize = 0;
+            }
+        }finally{
+            rwl.writeLock().unlock();
+        }
+    }
+
+    public class Entry<K,V>{
+        Entry<K, V> pre;
+        Entry<K,V> next;
+        K key;
+        V value;
+
+        Entry(Entry<K, V> p,Entry<K,V> next,K k,V value){
+            this.pre = p;
+            this.next = next;
+            this.key = k;
+            this.value = value;
+        }
+    }
+}
+
+
+```
+
+
+
 ## 什么是生产者和消费者模式：
 
 生产者和消费者模式是通过一个容器来解决生产者和消费者的强耦合问题。生产者和消费者彼此并不直接通信，而是通过阻塞队列进行通信，所以生产者生产完数据后不用等待消费者进行处理，而是直接扔给阻塞队列，消费者不找生产者要数据，而是直接从阻塞队列中获取数据，阻塞队列就相当于一个缓冲区，平衡生产者和消费者的处理能力。
