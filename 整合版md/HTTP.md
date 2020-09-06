@@ -1136,6 +1136,67 @@
 
   	- 如果是机器挂了，说明操作系统也没了，那么客户端在建立连接的时候，只会发送第一次握手的包，当然收不到，然后重试几次，就不试了。
   - 如果是进程挂了，那么操作系统还在，操作系统会代替进程向客户端发送一个RESET的包，此时客户端就知道通信的那个进程没了，直接关闭连接。
+  
+- 长连接与短连接
+
+   **TCP 本身并没有长短连接的区别** ，长短与否，完全取决于我们怎么用它。
+
+   - 短连接：每次通信时，创建 Socket；一次通信结束，调用 socket.close()。这就是一般意义上的短连接，短连接的好处是管理起来比较简单，存在的连接都是可用的连接，不需要额外的控制手段。
+   - 长连接：每次通信完毕后，不会关闭连接，这样可以做到连接的复用。 **长连接的好处是省去了创建连接的耗时。**
+
+   短连接和长连接的优势，分别是对方的劣势。想要图简单，不追求高性能，使用短连接合适，这样我们就不需要操心连接状态的管理；想要追求性能，使用长连接，我们就需要担心各种问题：比如 **端对端连接的维护，连接的保活** 。
+
+   长连接还常常被用来做数据的推送，我们大多数时候对通信的认知还是 request/response 模型，但 TCP 双工通信的性质决定了它还可以被用来做双向通信。在长连接之下，可以很方便的实现 push 模型。
+
+- 连接的保活
+
+   这个话题就有的聊了，会牵扯到比较多的知识点。首先需要明确一点，为什么需要连接的保活？当双方已经建立了连接，但因为网络问题，链路不通，这样长连接就不能使用了。需要明确的一点是，通过 netstat，lsof 等指令查看到连接的状态处于 `ESTABLISHED` 状态并不是一件非常靠谱的事，因为连接可能已死，但没有被系统感知到，更不用提假死这种疑难杂症了。如果保证长连接可用是一件技术活。
+
+
+   - 连接的保活：KeepAlive
+
+      首先想到的是 TCP 中的 KeepAlive 机制。KeepAlive 并不是 TCP 协议的一部分，但是大多数操作系统都实现了这个机制（所以需要在操作系统层面设置 KeepAlive 的相关参数）。KeepAlive 机制开启后，在一定时间内（一般时间为 7200s，参数 `tcp_keepalive_time`）在链路上没有数据传送的情况下，TCP 层将发送相应的 KeepAlive 探针以确定连接可用性，探测失败后重试 10（参数 `tcp_keepalive_probes`）次，每次间隔时间 75s（参数 `tcp_keepalive_intvl`），所有探测失败后，才认为当前连接已经不可用。
+
+      在 Netty 中开启 KeepAlive：
+
+      ```
+      bootstrap.option(ChannelOption.SO_KEEPALIVE, true)
+      ```
+
+      Linux 操作系统中设置 KeepAlive 相关参数，修改 `/etc/sysctl.conf` 文件：
+
+      ```
+      net.ipv4.tcp_keepalive_time=90
+      net.ipv4.tcp_keepalive_intvl=15
+      net.ipv4.tcp_keepalive_probes=2
+      ```
+
+      **KeepAlive 机制是在网络层面保证了连接的可用性** ，但站在应用框架层面我们认为这还不够。主要体现在三个方面：
+
+      - KeepAlive 的开关是在应用层开启的，但是具体参数（如重试测试，重试间隔时间）的设置却是操作系统级别的，位于操作系统的 `/etc/sysctl.conf` 配置中，这对于应用来说不够灵活。
+      - KeepAlive 的保活机制只在链路空闲的情况下才会起到作用，假如此时有数据发送，且物理链路已经不通，操作系统这边的链路状态还是 `ESTABLISHED`，这时会发生什么？自然会走 TCP 重传机制，要知道默认的 TCP 超时重传，指数退避算法也是一个相当长的过程。
+      - KeepAlive 本身是面向网络的，并不面向于应用，当连接不可用，可能是由于应用本身的 GC 频繁，系统 load 高等情况，但网络仍然是通的，此时，应用已经失去了活性，连接应该被认为是不可用的。
+
+      我们已经为应用层面的连接保活做了足够的铺垫，下面就来一起看看，怎么在应用层做连接保活。
+
+   - 连接的保活：应用层心跳
+
+      终于点题了，文题中提到的 **心跳** 便是一个本文想要重点强调的另一个重要的知识点。上一节我们已经解释过了，网络层面的 KeepAlive 不足以支撑应用级别的连接可用性，本节就来聊聊应用层的心跳机制是实现连接保活的。
+
+      如何理解应用层的心跳？简单来说，就是客户端会开启一个定时任务，定时对已经建立连接的对端应用发送请求（这里的请求是特殊的心跳请求），服务端则需要特殊处理该请求，返回响应。如果心跳持续多次没有收到响应，客户端会认为连接不可用，主动断开连接。不同的服务治理框架对心跳，建连，断连，拉黑的机制有不同的策略，但大多数的服务治理框架都会在应用层做心跳，Dubbo/HSF 也不例外。
+
+   - 应用层心跳的设计细节
+
+      以 Dubbo 为例，支持应用层的心跳，客户端和服务端都会开启一个 `HeartBeatTask`，客户端在 `HeaderExchangeClient` 中开启，服务端将在 `HeaderExchangeServer` 开启。文章开头埋了一个坑：Dubbo 为什么在服务端同时维护 `Map<String,Channel>` 呢？主要就是为了给心跳做贡献，心跳定时任务在发现连接不可用时，会根据当前是客户端还是服务端走不同的分支，客户端发现不可用，是重连；服务端发现不可用，是直接 close。
+
+   - 注意和 HTTP 的 KeepAlive 区别对待
+
+      - HTTP 协议的 KeepAlive 意图在于连接复用，同一个连接上串行方式传递请求 - 响应数据
+      - TCP 的 KeepAlive 机制意图在于保活、心跳，检测连接错误。
+
+   
+
+- 
 
 
 ## 套接字 Socket
@@ -1521,7 +1582,72 @@
     - JWT是自我校验的，所以是无状态的。JWT在客户端是不能做任何操作的，只有客户端发送请求时附带token，然后由服务端解析JWT后做自我校验
     - 服务端无需存储jwt令牌，通过特定的算法和密钥校验token，同时取出Payload中携带的用户ID，减少不必要的数据库查询
 
+- 用户认证
 
+  - 所谓用户认证（Authentication），就是让用户登录，并且在接下来的一段时间内让用户访问网站时可以使用其账户，而不需要再次登录的机制。
+
+    > 小知识：可别把用户认证和用户授权（Authorization）搞混了。用户授权指的是规定并允许用户使用自己的权限，例如发布帖子、管理站点等。
+
+    首先，服务器应用（下面简称“应用”）让用户通过 Web 表单将自己的用户名和密码发送到服务器的接口。这一过程一般是一个 HTTP POST 请求。建议的方式是通过 SSL 加密的传输（https 协议），从而避免敏感信息被嗅探。
+
+    [![auth1](https://kirito.iocoder.cn/jwtauth1.png)](https://kirito.iocoder.cn/jwtauth1.png)auth1
+
+    接下来，应用和数据库核对用户名和密码。
+
+    [![auth2](https://kirito.iocoder.cn/jwtauth2.png)](https://kirito.iocoder.cn/jwtauth2.png)auth2
+
+    核对用户名和密码成功后，应用将用户的 `id`（图中的 `user_id`）作为 JWT Payload 的一个属性，将其与头部分别进行 Base64 编码拼接后签名，形成一个 JWT。这里的 JWT 就是一个形同 `lll.zzz.xxx` 的字符串。
+
+    [![auth3](https://kirito.iocoder.cn/jwtauth3.png)](https://kirito.iocoder.cn/jwtauth3.png)auth3
+
+    应用将 JWT 字符串作为该请求 Cookie 的一部分返回给用户。注意，在这里必须使用 `HttpOnly` 属性来防止 Cookie 被 JavaScript 读取，从而避免 [跨站脚本攻击（XSS 攻击）](http://www.cnblogs.com/bangerlee/archive/2013/04/06/3002142.html)。
+
+    [![auth4](https://kirito.iocoder.cn/jwtauth4.png)](https://kirito.iocoder.cn/jwtauth4.png)auth4
+
+    在 Cookie 失效或者被删除前，用户每次访问应用，应用都会接受到含有 `jwt` 的 Cookie。从而应用就可以将 JWT 从请求中提取出来。
+
+    [![auth5](https://kirito.iocoder.cn/jwtauth5.png)](https://kirito.iocoder.cn/jwtauth5.png)auth5
+
+    应用通过一系列任务检查 JWT 的有效性。例如，检查签名是否正确；检查 Token 是否过期；检查 Token 的接收方是否是自己（可选）。
+
+    [![auth6](https://kirito.iocoder.cn/jwtauth6.png)](https://kirito.iocoder.cn/jwtauth6.png)auth6
+
+    应用在确认 JWT 有效之后，JWT 进行 Base64 解码（可能在上一步中已经完成），然后在 Payload 中读取用户的 id 值，也就是 `user_id` 属性。这里用户的 `id` 为 1025。
+
+    应用从数据库取到 `id` 为 1025 的用户的信息，加载到内存中，进行 ORM 之类的一系列底层逻辑初始化。
+
+    [![auth7](https://kirito.iocoder.cn/jwtauth7.png)](https://kirito.iocoder.cn/jwtauth7.png)auth7
+
+    应用根据用户请求进行响应。
+
+    [![auth8](https://kirito.iocoder.cn/jwtauth8.png)](https://kirito.iocoder.cn/jwtauth8.png)auth8
+
+    ### 和 Session 方式存储 id 的差异
+
+    Session 方式存储用户 id 的最大弊病在于要占用大量服务器内存，对于较大型应用而言可能还要保存许多的状态。一般而言，大型应用还需要借助一些 KV 数据库和一系列缓存机制来实现 Session 的存储。
+
+    而 JWT 方式将用户状态分散到了客户端中，可以明显减轻服务端的内存压力。除了用户 id 之外，还可以存储其他的和用户相关的信息，例如该用户是否是管理员、用户所在的分桶（见 [《你所应该知道的 A/B 测试基础》一文] 等。
+
+    虽说 JWT 方式让服务器有一些计算压力（例如加密、编码和解码），但是这些压力相比磁盘 I/O 而言或许是半斤八两。具体是否采用，需要在不同场景下用数据说话。
+
+    ### 单点登录
+
+    Session 方式来存储用户 id，一开始用户的 Session 只会存储在一台服务器上。对于有多个子域名的站点，每个子域名至少会对应一台不同的服务器，例如：
+
+    - [www.taobao.com](http://www.taobao.com/)
+    - nv.taobao.com
+    - nz.taobao.com
+    - login.taobao.com
+
+    所以如果要实现在 `login.taobao.com` 登录后，在其他的子域名下依然可以取到 Session，这要求我们在多台服务器上同步 Session。
+
+    使用 JWT 的方式则没有这个问题的存在，因为用户的状态已经被传送到了客户端。因此，我们只需要将含有 JWT 的 Cookie 的 `domain` 设置为顶级域名即可，例如
+
+    ```
+    Set-Cookie: jwt=lll.zzz.xxx; HttpOnly; max-age=980000; domain=.taobao.com
+    ```
+
+    注意 `domain` 必须设置为一个点加顶级域名，即 `.taobao.com`。这样，taobao.com 和 *.taobao.com 就都可以接受到这个 Cookie，并获取 JWT 了。
 
 
 

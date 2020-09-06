@@ -1011,7 +1011,7 @@ List<? extendsPerson>表示该list集合中存放的都是Person的子类型（�
 
 - HashMap 的初始化
 
-  - 当初始化是构造函数指定 1w 时，后续我们立即存入 1w 条数据，是否符合与其不会触发扩容呢
+  - **当初始化是构造函数指定 1w 时，后续我们立即存入 1w 条数据，是否符合与其不会触发扩容呢**
 - 在 HashMap 中，提供了一个指定初始容量的构造方法 `HashMap(int initialCapacity)`，这个方法最终会调用到 HashMap 另一个构造方法，其中的参数 loadFactor 就是默认值 0.75f。
     - 其中的成员变量 `threshold` 就是用来存储，触发 HashMap 扩容的阈值，也就是说，当 HashMap 存储的数据量达到 `threshold` 时，就会触发扩容。
   - 从构造方法的逻辑可以看出，HashMap 并不是直接使用外部传递进来的 `initialCapacity`，而是经过了 `tableSizeFor()` 方法的处理，再赋值到 `threshole` 上。
@@ -1028,7 +1028,7 @@ List<? extendsPerson>表示该list集合中存放的都是Person的子类型（�
   - 通常在初始化 HashMap 时，初始容量都是根据业务来的，而不会是一个固定值，为此我们需要有一个特殊处理的方式，就是将预期的初始容量，再除以 HashMap 的装载因子，默认时就是除以 0.75。
     - 例如想要用 HashMap 存放 1k 条数据，应该设置 1000 / 0.75，实际传递进去的值是 1333，然后会被 `tableSizeFor()` 方法调整到 2048，足够存储数据而不会触发扩容。
     - 当想用 HashMap 存放 1w 条数据时，依然设置 10000 / 0.75，实际传递进去的值是 13333，会被调整到 16384，和我们直接传递 10000 效果是一样的。
-  - 最后我们再总结一下：
+  - **总结**：
     1. HashMap 构造方法传递的 initialCapacity，虽然在处理后被存入了 loadFactor 中，但它实际表示 table 的容量。
     2. 构造方法传递的 initialCapacity，最终会被 `tableSizeFor()` 方法动态调整为 2 的 N 次幂，以方便在扩容的时候，计算数据在 newTable 中的位置。
     3. 如果设置了 table 的初始容量，会在初始化 table 时，将扩容阈值 threshold 重新调整为 table.size * loadFactor。
@@ -1173,8 +1173,9 @@ List<? extendsPerson>表示该list集合中存放的都是Person的子类型（�
       - 先左旋再右旋
     - 左右跟右左互为镜像，左左跟右右也互为镜像
 - **平衡二叉树（AVL树）**
-  - 平衡二叉树(Balance Binary Tree)又称AVL树。它或者是一颗空树，或者是具有下列性质的二叉树：它的左子树和右子树都是平衡二叉树，且左子树和右子树的深度之差的绝对值不超过1。
-
+  
+- 平衡二叉树(Balance Binary Tree)又称AVL树。它或者是一颗空树，或者是具有下列性质的二叉树：它的左子树和右子树都是平衡二叉树，且左子树和右子树的深度之差的绝对值不超过1。
+  
 - **最小生成树**
 
   - 关于图的几个概念定义：

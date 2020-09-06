@@ -417,7 +417,7 @@
 
 
 
-## 系统的软中断CPU使用率升高
+## 系统的软中断CPU使用率升高（SYN泛洪）
 
 - sar、 hping3 和 tcpdump
 
