@@ -56,8 +56,6 @@
 
 ## 安全性、活跃性以及性能问题
 
-
-
 - 安全性问题
 
   - 理论上线程安全的程序，就要避免出现原子性问题、可见性问题和有序性问题。
@@ -115,6 +113,20 @@
     - Java 并发包里面的原子类也是一种无锁的数据结构；Disruptor 则是一个无锁的内存队列
   - 第二，减少锁持有的时间
     - 例如使用细粒度的锁，一个典型的例子就是 Java 并发包里的 ConcurrentHashMap，它使用了所谓分段锁的技术；还可以使用读写锁，也就是读是无锁的，只有写的时候才会互斥
+
+
+
+## 在Java程序中怎么保证多线程的运行安全
+
+- 安全类、自动锁、手动锁
+  - 方法一：使用安全类，比如JUC下的类
+  - 方法二：使用自动锁synchronized
+  - 方法三：使用互斥锁Lock
+- ThreadLocal
+- final
+- 局部变量
+  - 被分配在线程栈内存中
+  - 线程的栈内存只能自己访问，所以栈内存中的变量只属于自己，其它线程根本就不知道。
 
 
 
@@ -263,7 +275,16 @@
   - 该启动的线程不会马上运行，会放到等待队列中等待 CPU 调度，只有线程真正被 CPU 调度时才会调用 run() 方法执行。
   - start() 方法被标识为 synchronized 的，即为了防止被多次启动的一个同步操作。
 
-  
+
+
+
+## java锁类型
+
+乐观锁、悲观锁、可重入锁、公平锁、自旋锁、读写锁（共享锁、互斥锁）、可中断锁、偏向锁、轻量/重量级锁。
+
+
+
+
 
 ## **用锁的最佳实践**
 
@@ -456,7 +477,7 @@
 
   
 
-## 上下文切换
+## 上下文切换（Synchronized 发生进程间的上下文切换）
 
 - 处理器给每个线程分配 CPU 时间片（Time Slice），线程在分配获得的时间片内执行任务。一个线程被暂停剥夺使用权，另外一个线程被选中开始或者继续运行的过程就叫做上下文切换（Context Switch）。
 
@@ -503,7 +524,7 @@
 
 - 竞争锁、线程间的通信以及过多地创建线程等多线程编程操作，都会给系统带来上下文切换。除此之外，I/O 阻塞以及 JVM 的垃圾回收也会增加上下文切换。
 
-- 本质上java目前都是利用内核线程，所以都会有上下文切换**
+- **本质上java目前都是利用内核线程，所以都会有上下文切换**
 
   - Lock是通过AQS的state以及CAS操作判断是否持有锁，AQS中，阻塞线程再次获取锁时，是通过state以及CAS操作判断，只有没有竞争成功时，才会再次被挂起，这样可以尽量减少上下文切换。
   - AQS挂起是通过LockSupport中的park进入阻塞状态，这个过程也是存在进程上下文切换的。但被阻塞的线程再次获取锁时，不会产生进程上下文切换，而synchronized阻塞的线程每次获取锁资源都要通过系统调用内核来完成，这样就比AQS阻塞的线程更消耗系统资源了。
@@ -624,7 +645,7 @@ JDK 1.5 以后的 `AtomicStampedReference 类`就提供了此种能力，其中�
 
 CAS 只对单个共享变量有效，当操作涉及跨多个共享变量时 CAS 无效。但是从 JDK 1.5开始，提供了`AtomicReference类`来保证引用对象之间的原子性，你可以把多个变量放在一个对象里来进行 CAS 操作.所以我们可以使用锁或者利用`AtomicReference类`把多个共享变量合并成一个共享变量来操作。
 
-### **六、CAS与synchronized的使用情景**
+## CAS与synchronized的使用情景
 
 简单的来说CAS适用于写比较少的情况下（多读场景，冲突一般较少），synchronized适用于写比较多的情况下（多写场景，冲突一般较多）
 
@@ -841,20 +862,6 @@ CAS 只对单个共享变量有效，当操作涉及跨多个共享变量时 CAS
 
 
 
-## 在Java程序中怎么保证多线程的运行安全
-
-- 安全类、自动锁、手动锁
-  - 方法一：使用安全类，比如JUC下的类
-  - 方法二：使用自动锁synchronized
-  - 方法三：使用互斥锁Lock
-- ThreadLocal
-- final
-- 局部变量
-  - 被分配在线程栈内存中
-  - 线程的栈内存只能自己访问，所以栈内存中的变量只属于自己，其它线程根本就不知道。
-
-
-
 
 
 ## semaphore和mutex的区别
@@ -999,7 +1006,7 @@ CAS 只对单个共享变量有效，当操作涉及跨多个共享变量时 CAS
 
 ## AQS的源码分析
 
-清楚了AQS的基本架构以后，我们来分析一下AQS的源码，仍然以ReentrantLock为模型。
+**清楚了AQS的基本架构以后，我们来分析一下AQS的源码，仍然以ReentrantLock为模型。**
 
 **ReentrantLock的时序图**
 
@@ -1017,7 +1024,7 @@ public void lock() {
 }
 ```
 
-这个是获取锁的入口，调用sync这个类里面的方法，sync是什么呢？
+**这个是获取锁的入口，调用sync这个类里面的方法**，sync是什么呢？
 
 ```
 abstract static class Sync extends AbstractQueuedSynchronizer
@@ -1031,9 +1038,11 @@ sync是一个静态内部类，它继承了AQS这个抽象类，前面说过AQS�
 
 公平锁和非公平锁的实现上的差异，我会在文章后面做一个解释，接下来的分析仍然以`非公平锁`作为主要分析逻辑。
 
-#### NonfairSync.lock
+#### NonfairSync.lock——非公平锁
 
-```
+如果是公平锁，在公平锁的机制下，任何线程想要获取锁，都要排队，不可能出现插队的情况。这就是公平锁的实现原理。
+
+```java
 final void lock() {
     if (compareAndSetState(0, 1)) //通过cas操作来修改state状态，表示争抢锁的操作
       setExclusiveOwnerThread(Thread.currentThread());//设置当前获得锁状态的线程
@@ -1051,40 +1060,37 @@ final void lock() {
 > **compareAndSetState**
 > compareAndSetState的代码实现逻辑如下
 
-```
+```java
 // See below for intrinsics setup to support this
 return unsafe.compareAndSwapInt(this, stateOffset, expect, update);
 ```
 
-}
+- 这段代码其实逻辑很简单，就是通过cas乐观锁的方式来做比较并替换。上面这段代码的意思是，如果当前内存中的state的值和预期值expect相等，则替换为update。更新成功返回true，否则返回false.
+- 这个操作是原子的，不会出现线程安全问题，这里面涉及到Unsafe这个类的操作，一级涉及到state这个属性的意义。
 
-> ```
-> 这段代码其实逻辑很简单，就是通过cas乐观锁的方式来做比较并替换。上面这段代码的意思是，如果当前内存中的state的值和预期值expect相等，则替换为update。更新成功返回true，否则返回false.
-> 这个操作是原子的，不会出现线程安全问题，这里面涉及到Unsafe这个类的操作，一级涉及到state这个属性的意义。
-> **state**
-> ```
-
-- 当state=0时，表示无锁状态
-- 当state>0时，表示已经有线程获得了锁，也就是state=1，但是因为ReentrantLock允许重入，所以同一个线程多次获得同步锁的时候，state会递增，比如重入5次，那么state=5。 而在释放锁的时候，同样需要释放5次直到state=0其他线程才有资格获得锁
+- **state**
+  - 当state=0时，表示无锁状态
+  - 当state>0时，表示已经有线程获得了锁，也就是state=1，但是因为ReentrantLock允许重入，所以同一个线程多次获得同步锁的时候，state会递增，比如重入5次，那么state=5。 而在释放锁的时候，同样需要释放5次直到state=0其他线程才有资格获得锁
 
 > ```
 > private volatile int state;
 > ```
 >
 > 需要注意的是：不同的AQS实现，state所表达的含义是不一样的。
-> **Unsafe**
-> Unsafe类是在sun.misc包下，不属于Java标准。但是很多Java的基础类库，包括一些被广泛使用的高性能开发库都是基于Unsafe类开发的，比如Netty、Hadoop、Kafka等；Unsafe可认为是Java中留下的后门，提供了一些低层次操作，如直接内存访问、线程调度等
->
-> ```
-> public final native boolean compareAndSwapInt(Object var1, long var2, int var4, int var5);
-> ```
->
-> 这个是一个native方法， 第一个参数为需要改变的对象，第二个为偏移量(即之前求出来的headOffset的值)，第三个参数为期待的值，第四个为更新后的值
-> 整个方法的作用是如果当前时刻的值等于预期值var4相等，则更新为新的期望值 var5，如果更新成功，则返回true，否则返回false；
+
+**Unsafe**
+Unsafe类是在sun.misc包下，不属于Java标准。但是很多Java的基础类库，包括一些被广泛使用的高性能开发库都是基于Unsafe类开发的，比如Netty、Hadoop、Kafka等；Unsafe可认为是Java中留下的后门，提供了一些低层次操作，如直接内存访问、线程调度等
+
+```
+public final native boolean compareAndSwapInt(Object var1, long var2, int var4, int var5);
+```
+
+这个是一个native方法， 第一个参数为需要改变的对象，第二个为偏移量(即之前求出来的headOffset的值)，第三个参数为期待的值，第四个为更新后的值
+整个方法的作用是如果当前时刻的值等于预期值var4相等，则更新为新的期望值 var5，如果更新成功，则返回true，否则返回false；
 
 #### acquire
 
-acquire是AQS中的方法，如果CAS操作未能成功，说明state已经不为0，此时继续acquire(1)操作,这里大家思考一下，acquire方法中的1的参数是用来做什么呢？如果没猜中，往前面回顾一下state这个概念
+**acquire是AQS中的方法，如果CAS操作未能成功，说明state已经不为0，此时继续acquire(1)操作,**这里大家思考一下，acquire方法中的1的参数是用来做什么呢？如果没猜中，往前面回顾一下state这个概念
 
 ```
     public final void acquire(int arg) {
@@ -1104,7 +1110,7 @@ acquire是AQS中的方法，如果CAS操作未能成功，说明state已经不�
 
 #### NonfairSync.tryAcquire
 
-这个方法的作用是尝试获取锁，如果成功返回true，不成功返回false
+**这个方法的作用是尝试获取锁，如果成功返回true，不成功返回false**
 它是重写AQS类中的tryAcquire方法，并且大家仔细看一下AQS中tryAcquire方法的定义，并没有实现，而是抛出异常。按照一般的思维模式，既然是一个不实现的模版方法，那应该定义成abstract，让子类来实现呀？大家想想为什么
 
 ```
@@ -1113,11 +1119,11 @@ protected final boolean tryAcquire(int acquires) {
 }
 ```
 
-#### nonfairTryAcquire
+#### nonfairTryAcquire——重入锁
 
 tryAcquire(1)在NonfairSync中的实现代码如下
 
-```
+```java
 ffinal boolean nonfairTryAcquire(int acquires) {
     //获得当前执行的线程
     final Thread current = Thread.currentThread();
@@ -1149,7 +1155,7 @@ ffinal boolean nonfairTryAcquire(int acquires) {
 
 #### addWaiter
 
-当tryAcquire方法获取锁失败以后，则会先调用addWaiter将当前线程封装成Node，然后添加到AQS队列
+**当tryAcquire方法获取锁失败以后，则会先调用addWaiter将当前线程封装成Node，然后添加到AQS队列**
 
 ```
 private Node addWaiter(Node mode) { //mode=Node.EXCLUSIVE
@@ -1176,7 +1182,7 @@ private Node addWaiter(Node mode) { //mode=Node.EXCLUSIVE
 
 #### enq
 
-enq就是通过自旋操作把当前节点加入到队列中
+**enq就是通过自旋操作把当前节点加入到队列中**
 
 ```
 private Node enq(final Node node) {
@@ -1208,7 +1214,7 @@ private Node enq(final Node node) {
 
 #### acquireQueued
 
-将添加到队列中的Node作为参数传入acquireQueued方法，这里面会做抢占锁的操作
+**将添加到队列中的Node作为参数传入acquireQueued方法，这里面会做抢占锁的操作**
 
 ```
 final boolean acquireQueued(final Node node, int arg) {
@@ -1247,7 +1253,7 @@ final boolean acquireQueued(final Node node, int arg) {
 #### shouldParkAfterFailedAcquire
 
 从上面的分析可以看出，只有队列的第二个节点可以有机会争用锁，如果成功获取锁，则此节点晋升为头节点。对于第三个及以后的节点，if (p == head)条件不成立，首先进行shouldParkAfterFailedAcquire(p, node)操作
-shouldParkAfterFailedAcquire方法是判断一个争用锁的线程是否应该被阻塞。它首先判断一个节点的前置节点的状态是否为Node.SIGNAL，如果是，是说明此节点已经将状态设置-如果锁释放，则应当通知它，所以它可以安全的阻塞了，返回true。
+**shouldParkAfterFailedAcquire方法是判断一个争用锁的线程是否应该被阻塞**。它首先判断一个节点的前置节点的状态是否为Node.SIGNAL，如果是，是说明此节点已经将状态设置-如果锁释放，则应当通知它，所以它可以安全的阻塞了，返回true。
 
 ```
 private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
@@ -1275,7 +1281,7 @@ private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
 
 #### parkAndCheckInterrupt
 
-如果shouldParkAfterFailedAcquire返回了true，则会执行：`parkAndCheckInterrupt()`方法，它是通过LockSupport.park(this)将当前线程挂起到WATING状态，它需要等待一个中断、unpark方法来唤醒它，通过这样一种FIFO的机制的等待，来实现了Lock的操作。
+如果shouldParkAfterFailedAcquire返回了true，则会执行：**`parkAndCheckInterrupt()`方法，它是通过LockSupport.park(this)将当前线程挂起到WATING状态**，它需要等待一个中断、unpark方法来唤醒它，通过这样一种FIFO的机制的等待，来实现了Lock的操作。
 
 ```
 private final boolean parkAndCheckInterrupt() {
@@ -1299,7 +1305,7 @@ private final boolean parkAndCheckInterrupt() {
 
 ### ReentrantLock.unlock
 
-加锁的过程分析完以后，再来分析一下释放锁的过程，调用release方法，这个方法里面做两件事，1，释放锁 ；2，唤醒park的线程
+加锁的过程分析完以后，再来分析一下释放锁的过程，**调用release方法，这个方法里面做两件事，1，释放锁 ；2，唤醒park的线程**
 
 ```
 public final boolean release(int arg) {
@@ -1315,7 +1321,7 @@ public final boolean release(int arg) {
 
 ### tryRelease
 
-这个动作可以认为就是一个设置锁状态的操作，而且是将状态减掉传入的参数值（参数是1），如果结果状态为0，就将排它锁的Owner设置为null，以使得其它的线程有机会进行执行。
+**这个动作可以认为就是一个设置锁状态的操作，而且是将状态减掉传入的参数值（参数是1），如果结果状态为0，就将排它锁的Owner设置为null，以使得其它的线程有机会进行执行。**
 在排它锁中，加锁的时候状态会增加1（当然可以自己修改这个值），在解锁的时候减掉1，同一个锁，在可以重入后，可能会被叠加为2、3、4这些值，只有unlock()的次数与lock()的次数对应才会将Owner线程设置为空，而且也只有这种情况下才会返回true。
 
 ```
@@ -1337,7 +1343,7 @@ protected final boolean tryRelease(int releases) {
 
 ### unparkSuccessor
 
-在方法unparkSuccessor(Node)中，就意味着真正要释放锁了，它传入的是head节点（head节点是占用锁的节点），当前线程被释放之后，需要唤醒下一个节点的线程
+**在方法unparkSuccessor(Node)中，就意味着真正要释放锁了**，它传入的是head节点（head节点是占用锁的节点），当前线程被释放之后，需要唤醒下一个节点的线程
 
 ```
 private void unparkSuccessor(Node node) {
@@ -1359,9 +1365,7 @@ private void unparkSuccessor(Node node) {
 
 ## 总结
 
-通过这篇文章基本将AQS队列的实现过程做了比较清晰的分析，主要是基于非公平锁的独占锁实现。在获得同步锁时，同步器维护一个同步队列，获取状态失败的线程都会被加入到队列中并在队列中进行自旋；移出队列（或停止自旋）的条件是前驱节点为头节点且成功获取了同步状态。在释放同步状态时，同步器调用tryRelease(int arg)方法释放同步状态，然后唤醒头节点的后继节点。
-
-
+通过这篇文章基本将AQS队列的实现过程做了比较清晰的分析，主要是基于非公平锁的独占锁实现。**在获得同步锁时，同步器维护一个同步队列，获取状态失败的线程都会被加入到队列中并在队列中进行自旋；移出队列（或停止自旋）的条件是前驱节点为头节点且成功获取了同步状态。在释放同步状态时，同步器调用tryRelease(int arg)方法释放同步状态，然后唤醒头节点的后继节点。**
 
 
 
@@ -1413,9 +1417,9 @@ private void unparkSuccessor(Node node) {
   
   ```
 
-- 可重入锁
+- **可重入锁**
 
-- 公平锁与非公平锁
+- **公平锁与非公平锁**
 
 - 减少锁的持有时间、减小锁的粒度
 
@@ -1445,10 +1449,10 @@ private void unparkSuccessor(Node node) {
   -  特性比较
 
     - ReentrantLock的优势体现在：
-      具备尝试非阻塞地获取锁的特性：当前线程尝试获取锁，如果这一时刻锁没有被其他线程获取到，则成功获取并持有锁
-    - 能被中断地获取锁的特性：与synchronized不同，获取到锁的线程能够响应中断，当获取到锁的线程被中断时，中断异常将会被抛出，同时锁会被释放
-    - 超时获取锁的特性：在指定的时间范围内获取锁；如果截止时间到了仍然无法获取锁，则返回
-
+      - ReenTrantLock可以指定是公平锁还是非公平锁; synchronized只能是非公平锁。
+      - 具备尝试非阻塞地获取锁的特性：当前线程尝试获取锁，如果这一时刻锁没有被其他线程获取到，则成功获取并持有锁
+      - 能被中断地获取锁的特性：与synchronized不同，获取到锁的线程能够响应中断，当获取到锁的线程被中断时，中断异常将会被抛出，同时锁会被释放
+  - 超时获取锁的特性：在指定的时间范围内获取锁；如果截止时间到了仍然无法获取锁，则返回
     - 3 注意事项
       在使用ReentrantLock类的时，一定要注意三点：
       在finally中释放锁，目的是保证在获取锁之后，最终能够被释放
@@ -1459,7 +1463,13 @@ private void unparkSuccessor(Node node) {
 
   - AQS和Condition各自维护了不同的队列，在使用lock和condition的时候，其实就是两个队列的互相移动。
   - 如果我们想自定义一个同步器，可以实现AQS。它提供了获取共享锁和互斥锁的方式，都是基于对state操作而言的。
-  - ReentranLock这个是可重入的。它内部自定义了同步器Sync，这个又实现了AQS，同时又实现了AOS，而后者就提供了一种互斥锁持有的方式。其实就是每次获取锁的时候，看下当前维护的那个线程和当前请求的线程是否一样，一样就可重入了
+  - **ReentranLock这个是可重入的**。它内部自定义了同步器Sync，这个又实现了AQS，同时又实现了AOS，而后者就提供了一种互斥锁持有的方式。其实就是每次获取锁的时候，看下当前维护的那个线程和当前请求的线程是否一样，一样就可重入了
+
+![img](https://picb.zhimg.com/v2-47dd44e9ae6c455e3987587338918997_b.jpg)
+
+
+
+
 
 
 
@@ -1846,7 +1856,7 @@ private void unparkSuccessor(Node node) {
 
 
 
-## 高性能限流器Guava RateLimiter
+# 高性能限流器Guava RateLimiter
 
 - Guava 实现令牌桶算法，用了一个很简单的办法，其关键是记录并动态计算下一令牌发放的时间
 
