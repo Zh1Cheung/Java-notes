@@ -2189,7 +2189,7 @@ Redis 拓扑结构信息包括了：
 
 
 
-## Redis性能问题
+## Redis性能问题(AOF重写、主从复制)
 
 - **Master调用BGREWRITEAOF重写AOF文件，AOF在重写的时候会占大量的CPU和内存资源，导致服务load过高，出现短暂服务暂停现象**
   - 将no-appendfsync-on-rewrite的配置设为yes可以缓解这个问题，设置为yes表示rewrite期间对新写操作不fsync，暂时存在内存中，等rewrite完成后再写入。
