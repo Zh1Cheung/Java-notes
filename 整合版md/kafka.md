@@ -4,9 +4,13 @@
 
   - 生产者和消费者统称为客户端（Clients）
 
-- Kafka 的服务器端由被称为 Broker 的服务进程构成，即一个 Kafka 集群由多个 Broker 组成，Broker 负责接收和处理客户端发送过来的请求，以及对消息进行持久化。
+- Kafka 的服务器端由被称为 Broker 的服务进程构成，即一个 Kafka 集群由多个 Broker 组成，**Broker 负责接收和处理客户端发送过来的请求，以及对消息进行持久化。**
 
   - 虽然多个 Broker 进程能够运行在同一台机器上，但更常见的做法是将不同的 Broker 分散运行在不同的机器上，这样如果集群中某一台机器宕机，即使在它上面运行的所有 Broker 进程都挂掉了，**其他机器上的 Broker 也依然能够对外提供服务。这其实就是 Kafka 提供高可用的手段之一。**
+
+- **broker和broker之间的怎么通信**
+
+  - broker之间的地址和端口是存储在zoo[keep]()er上的，zoo[keep]()er充当注册中心的角色。比如partition有多个副本，一个leader和多个follower，leader和follower进行通信就需要从zoo[keep]()er中获取地址和端口。
 
 - **实现高可用的另一个手段就是备份机制（Replication）。**
 
@@ -121,6 +125,13 @@
 
 
 
+
+## 保证同一个topic的消费的顺序
+
+- producer写的时候指定一个key，相同key的数据会分发到同一partition中去，而且这个partition中的数据一定是有顺序的。 
+- consumer从partition中取出数据的时候，也一定是有顺序的。 
+- consumer中多个线程来并发处理消息，因为单线程太难了，多线程又不能保证顺序消费。 
+- 写 N 个内存 queue，具有相同 key 的数据都到同一个内存 queue；然后对于 N 个线程，每个线程分别消费一个内存 queue 即可，这样就能保证顺序性。
 
 
 
