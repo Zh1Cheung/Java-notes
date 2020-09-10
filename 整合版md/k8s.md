@@ -1262,6 +1262,256 @@ Kubernetes版本表示为xyz，其中x是主要版本，y是次要版本，z是�
 
 
 
+## Pod 弹性伸缩详解与使用
+
+- Kubernetes HPA(Horizontal Pod Autoscaling)Pod水平自动伸缩，通过此功能，只需简单的配置，集群便可以利用监控指标（cpu使用率等）自动的扩容或者缩容服务中Pod数量，当业务需求增加时，系统将为您无缝地自动增加适量容器 ，提高系统稳定性。
+
+- ## 1. HPA概览
+
+  ![img](https://blog-10039692.file.myqcloud.com/1499234415756_6524_1499234415663.png)
+
+  HPA在kubernetes中被设计为一个controller，可以简单的使用kubectl autoscale命令来创建。HPA Controller默认30秒轮询一次，查询指定的resource中（Deployment,RC）的资源使用率，并且与创建时设定的值和指标做对比，从而实现自动伸缩的功能。
+
+  - 当你创建了HPA后，HPA会从Heapster或者用户自定义的RESTClient获取定义的资源中每一个pod利用率或原始值（取决于指定的目标类型）的平均值，然后和HPA中定义的指标进行对比，同时计算出需要伸缩的具体值并进行操作。
+  - **当Pod没有设置request时，HPA不会工作。**
+  - 目前，HPA可以从两种取到获取数据:
+    - Heapster(稳定版本，仅支持CPU使用率，在使用腾讯云[容器服务](https://cloud.tencent.com/product/tke?from=10680)时，需要手动安装)。
+    - 自定义的监控(alpha版本，不推荐用于生产环境) 。
+  - 当需要从自定义的监控中获取数据时，只能设置绝对值，无法设置使用率。
+  - 现在只支持Replication Controller, Deployment or Replica Set的扩缩容。
+
+  ## 2. 自动伸缩算法
+
+  - HPA Controller会通过调整副本数量使得CPU使用率尽量向期望值靠近，而且不是完全相等．另外，官方考虑到自动扩展的决策可能需要一段时间才会生效：例如当pod所需要的CPU负荷过大，从而在创建一个新pod的过程中，系统的CPU使用量可能会同样在有一个攀升的过程。所以，在每一次作出决策后的一段时间内，将不再进行扩展决策。对于扩容而言，这个时间段为3分钟，缩容为5分钟。
+  - HPA Controller中有一个tolerance（容忍力）的概念，它允许一定范围内的使用量的不稳定，现在默认为0.1，这也是出于维护系统稳定性的考虑。例如，设定HPA调度策略为cpu使用率高于50%触发扩容，那么只有当使用率大于55%或者小于45%才会触发伸缩活动，HPA会尽力把Pod的使用率控制在这个范围之间。
+  - 具体的每次扩容或者缩容的多少Pod的算法为： `        Ceil(前采集到的使用率 / 用户自定义的使用率) * Pod数量) `
+  - 每次最大扩容pod数量不会超过当前副本数量的2倍
+
+  ## 3. HPA YAML文件详解
+
+  下面是一个标准的基于heapster的HPA YAML文件，同时也补充了关键字段的含义
+
+  ```javascript
+  apiVersion: autoscaling/v1
+  kind: HorizontalPodAutoscaler
+  metadata:
+    creationTimestamp: 2017-06-29T08:04:08Z
+    name: nginxtest
+    namespace: default
+    resourceVersion: "951016361"
+    selfLink: /apis/autoscaling/v1/namespaces/default/horizontalpodautoscalers/nginxtest
+    uid: 86febb63-5ca1-11e7-aaef-5254004e79a3
+  spec:
+    maxReplicas: 5 //资源最大副本数
+    minReplicas: 1 //资源最小副本数
+    scaleTargetRef:
+      apiVersion: extensions/v1beta1
+      kind: Deployment //需要伸缩的资源类型
+      name: nginxtest  //需要伸缩的资源名称
+    targetCPUUtilizationPercentage: 50 //触发伸缩的cpu使用率
+  status:
+    currentCPUUtilizationPercentage: 48 //当前资源下pod的cpu使用率
+    currentReplicas: 1 //当前的副本数
+    desiredReplicas: 2 //期望的副本数
+    lastScaleTime: 2017-07-03T06:32:19Z
+  ```
+
+  ## 4. 如何使用
+
+  - 在上文的介绍中我们知道，HPA Controller有两种途径获取监控数据：Heapster和自定义监控，由于自定义监控一直处于alpha阶段，所以本文这次主要介绍在腾讯云容器服务中使用基于Heapster的HPA方法。
+  - 腾讯云容器服务没有默认安装Heapster，所以如果需要使用HPA需要手动安装。
+  - 此方法中需要使用kubectl命令操作集群，集群apiservice地址，账号和证书相关信息暂时可以提工单申请，相关功能的产品化方案已经在设计中。
+
+  ## 4.1 创建Heapster
+
+  创建Heapster ServiceAccount
+
+  ```javascript
+  apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: heapster
+    namespace: kube-system
+    labels:
+      kubernetes.io/cluster-service: "true"
+      addonmanager.kubernetes.io/mode: Reconcile
+  ```
+
+  创建Heapster deployment
+
+  ```javascript
+  apiVersion: extensions/v1beta1
+  kind: Deployment
+  metadata:
+    name: heapster-v1.4.0-beta.0
+    namespace: kube-system
+    labels:
+      k8s-app: heapster
+      kubernetes.io/cluster-service: "true"
+      addonmanager.kubernetes.io/mode: Reconcile
+      version: v1.4.0-beta.0
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        k8s-app: heapster
+        version: v1.4.0-beta.0
+    template:
+      metadata:
+        labels:
+          k8s-app: heapster
+          version: v1.4.0-beta.0
+        annotations:
+          scheduler.alpha.kubernetes.io/critical-pod: ''
+      spec:
+        containers:
+          - image: ccr.ccs.tencentyun.com/library/heapster-amd64:v1.4.0-beta.0
+            name: heapster
+            livenessProbe:
+              httpGet:
+                path: /healthz
+                port: 8082
+                scheme: HTTP
+              initialDelaySeconds: 180
+              timeoutSeconds: 5
+            command:
+              - /heapster
+              - --source=kubernetes.summary_api:''
+          - image: ccr.ccs.tencentyun.com/library/addon-resizer:1.7
+            name: heapster-nanny
+            resources:
+              limits:
+                cpu: 50m
+                memory: 90Mi
+              requests:
+                cpu: 50m
+                memory: 90Mi
+            command:
+              - /pod_nanny
+              - --cpu=80m
+              - --extra-cpu=0.5m
+              - --memory=140Mi
+              - --extra-memory=4Mi
+              - --threshold=5
+              - --deployment=heapster-v1.4.0-beta.0
+              - --container=heapster
+              - --poll-period=300000
+              - --estimator=exponential
+        serviceAccountName: heapster
+  ```
+
+  创建Heapster Service
+
+  ```javascript
+  kind: Service
+  apiVersion: v1
+  metadata: 
+    name: heapster
+    namespace: kube-system
+    labels: 
+      kubernetes.io/cluster-service: "true"
+      addonmanager.kubernetes.io/mode: Reconcile
+      kubernetes.io/name: "Heapster"
+  spec: 
+    ports: 
+      - port: 80
+        targetPort: 8082
+    selector: 
+      k8s-app: heapster
+  ```
+
+  保存上述的文件，并使用 `kubectl create -f FileName.yaml`创建，当创建完成后，可以使用`kubectl get` 查看
+
+  ```javascript
+  $ kubectl get deployment heapster-v1.4.0-beta.0 -n=kube-system
+  NAME                     DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
+  heapster-v1.4.0-beta.0   1         1         1            1           1m
+  $ kubectl get svc heapster -n=kube-system
+  NAME       CLUSTER-IP       EXTERNAL-IP   PORT(S)   AGE
+  heapster   172.16.255.119   <none>        80/TCP    4d
+  ```
+
+  ## 4.2 创建服务
+
+  创建一个用于测试的服务，可以选择从控制台创建，实例数量设置为1
+
+  ![img](https://blog-10039692.file.myqcloud.com/1499234432350_5294_1499234432376.png)
+
+  ## 4.3 创建HPA
+
+  现在，我们要创建一个HPA，可以使用如下命令
+
+  ```javascript
+  $ kubectl autoscale deployment nginxtest --cpu-percent=10 --min=1 --max=10
+  deployment "nginxtest" autoscaled
+  $ kubectl get hpa                                                         
+  NAME        REFERENCE              TARGET    CURRENT   MINPODS   MAXPODS   AGE
+  nginxtest   Deployment/nginxtest   10%       0%        1         10        13s
+  ```
+
+  此命令创建了一个关联资源nginxtest的HPA，最小的pod副本数为1，最大为10。HPA会根据设定的cpu使用率（10%）动态的增加或者减少pod数量，此地方用于测试，所以设定的伸缩阈值会比较小。
+
+  ## 4.4 测试
+
+  ### 4.4.1 增大负载
+
+  我们来创建一个busybox，并且循环访问上面创建的服务。
+
+  ```javascript
+  $ kubectl run -i --tty load-generator --image=busybox /bin/sh
+  If you don't see a command prompt, try pressing enter.
+  / # while true; do wget -q -O- http://172.16.255.60:4000; done
+  ```
+
+  下图可以看到，HPA已经开始工作。
+
+  ```javascript
+  $ kubectl get hpa
+  NAME        REFERENCE              TARGET    CURRENT   MINPODS   MAXPODS   AGE
+  nginxtest   Deployment/nginxtest   10%       29%        1         10        27m
+  ```
+
+  同时我们查看相关资源nginxtest的副本数量，副本数量已经从原来的1变成了3。
+
+  ```javascript
+  $ kubectl get deployment nginxtest
+  NAME        DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
+  nginxtest   3         3         3            3           4d
+  ```
+
+  同时再次查看HPA，由于副本数量的增加，使用率也保持在了10%左右。
+
+  ```javascript
+  $ kubectl get hpa
+  NAME        REFERENCE              TARGET    CURRENT   MINPODS   MAXPODS   AGE
+  nginxtest   Deployment/nginxtest   10%       9%        1         10        35m
+  ```
+
+  ### 4.4.2 减小负载
+
+  我们关掉刚才的busbox并等待一段时间。
+
+  ```javascript
+  $ kubectl get hpa     
+  NAME        REFERENCE              TARGET    CURRENT   MINPODS   MAXPODS   AGE
+  nginxtest   Deployment/nginxtest   10%       0%        1         10        48m
+  $ kubectl get deployment nginxtest
+  NAME        DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
+  nginxtest   1         1         1            1           4d
+  ```
+
+  可以看到副本数量已经由3变为1。
+
+  ## 5. 总结
+
+  本文主要介绍了HPA的相关原理和使用方法，此功能可以能对服务的容器数量做自动伸缩，对于服务的稳定性是一个很好的提升。但是当前稳定版本中只有cpu使用率这一个指标，是一个很大的弊端。我们会继续关注社区HPA自定义监控指标的特性，待功能稳定后，会持续输出相关文档。
+
+
+
+
+
+
+
 
 
 ## 声明式API与Kubernetes编程范式（kubectl apply 命令）
