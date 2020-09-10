@@ -331,7 +331,23 @@
     - 数据库重启的时候，所有的内存表都会被清空。
     - 在高可用架构下，内存表的这个特点简直可以当做 bug 来看待了。
 
-  
+
+## **InnoDB和MyISAM**
+
+**应用场景：**
+1).MyISAM管理非事务表。它提供高速存储和检索，以及全文搜索能力。如果应用中需要执行大量的SELECT查询，那么MyISAM是更好的选择。
+
+2).InnoDB用于事务处理应用程序，具有众多特性，包括ACID事务支持。如果应用中需要执行大量的INSERT或UPDATE操作，则应该使用InnoDB，这样可以提高多用户并发操作的性能。
+
+**主要区别：**
+1).MyISAM是非事务安全型的，而InnoDB是事务安全型的。
+2).MyISAM锁的粒度是表级，而InnoDB支持行级锁定。
+3).MyISAM支持全文类型索引，而InnoDB不支持全文索引。
+4).MyISAM相对简单，所以在效率上要优于InnoDB，小型应用可以考虑使用MyISAM。
+5).MyISAM表是保存成文件的形式，在跨平台的数据转移中使用MyISAM存储会省去不少的麻烦。
+6).InnoDB表比MyISAM表更安全，可以在保证数据不会丢失的情况下，切换非事务表到事务表（alter table tablename type=innodb）。
+
+
 
 ## InnoDB
 
