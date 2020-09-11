@@ -308,7 +308,7 @@ docker run -itd --name=tomcate -p 8080:8080 \
 
 
 
-## 隔离与限制（docker底层）
+## 隔离与限制（Namespace、cgroup）
 
 - 真正对隔离环境负责的是宿主机操作系统本身：
   - 用户运行在容器里的应用进程，跟宿主机上的其他进程一样，都由宿主机操作系统统一管理，只不过这些被隔离的进程拥有额外设置过的 Namespace 参数。而 Docker 项目在这里扮演的角色，更多的是旁路式的辅助和管理工作。
@@ -335,7 +335,7 @@ docker run -itd --name=tomcate -p 8080:8080 \
 
 
 
-## 容器镜像（docker底层）
+## 容器镜像（挂载rootfs）
 
 - 容器里的进程看到的文件系统又是什么样子的呢
   - Mount Namespace 修改的，是容器进程对文件系统“挂载点”的认知。但是，这也就意味着，只有在“挂载”这个操作发生之后，进程的视图才会被改变。而在此之前，新创建的容器会直接继承宿主机的各个挂载点。
@@ -412,7 +412,7 @@ docker run -itd --name=tomcate -p 8080:8080 \
 
 
 
-## Kubernetes的本质
+## Kubernetes的本质（架构）
 
 - 一个正在运行的 Linux 容器，其实可以被“一分为二”地看待：
   - 一组联合挂载在 /var/lib/docker/aufs/mnt 上的 rootfs，这一部分我们称为“容器镜像”（Container Image），是容器的静态视图；
@@ -721,7 +721,7 @@ Kubernetes版本表示为xyz，其中x是主要版本，y是次要版本，z是�
 
 
 
-## Pod使用
+## Pod使用（字段用法）
 
 - 到底哪些属性属于 Pod 对象，而又有哪些属性属于 Container 呢？
 
@@ -808,7 +808,7 @@ Kubernetes版本表示为xyz，其中x是主要版本，y是次要版本，z是�
 
 
 
-## “控制器”模型
+## “控制器”模型（kube-controller-manager ）
 
 - ```
   apiVersion: apps/v1 
@@ -884,7 +884,7 @@ Kubernetes版本表示为xyz，其中x是主要版本，y是次要版本，z是�
 
 
 
-## StatefulSet拓扑状态
+## StatefulSet拓扑状态（Headless Service）
 
 - Deployment认为，一个应用的所有 Pod，是完全一样的。所以，它们互相之间没有顺序，也无所谓运行在哪台宿主机上。
 
@@ -979,7 +979,7 @@ Kubernetes版本表示为xyz，其中x是主要版本，y是次要版本，z是�
 
 
 
-## StatefulSet存储状态
+## StatefulSet存储状态（PV、PVC）
 
 - Kubernetes 项目引入了一组叫作 Persistent VolumeClaim（PVC）和 Persistent Volume（PV）的 API 对象，大大降低了用户声明和使用持久化Volume 的门槛。
 - PVC
@@ -1043,7 +1043,7 @@ Kubernetes版本表示为xyz，其中x是主要版本，y是次要版本，z是�
 
 
 
-## DaemonSet
+## DaemonSet（金丝雀发布、灰度发布）
 
 - **金丝雀发布（Canary Deploy）或者灰度发布（希望只升级 StatefulSet 中的任意个节点进行测试,）**
 
@@ -1214,7 +1214,7 @@ Kubernetes版本表示为xyz，其中x是主要版本，y是次要版本，z是�
 
     - 所以，以此类推，不断地将 infra2 等后续成员添加到集群中，直到整个集群的节点数目等于用户指定的 size 之后，部署就完成了。
 
-- Etcd Operator 的工作原理
+- **Etcd Operator 的工作原理**
 
   - 跟所有的自定义控制器一样，Etcd Operator 的启动流程也是围绕着 Informer 展开的
   - Etcd Operator 启动要做的第一件事（ c.initResource），是创建 EtcdCluster 对象所需要的 CRD，即：前面提到的etcdclusters.etcd.database.coreos.com。这样Kubernetes 就能够“认识”EtcdCluster 这个自定义 API 资源了。
@@ -1562,7 +1562,7 @@ Kubernetes版本表示为xyz，其中x是主要版本，y是次要版本，z是�
 
 
 
-## API对象内部结构
+## API对象内部结构（API 插件机制CRD）
 
 - 一个 API 对象在 Etcd 里的完整资源路径，是由：Group（API 组）、Version（API 版本）和 Resource（API 资源类型）三个部分组成的。
 
@@ -2430,14 +2430,6 @@ kubectl convert -f . | kubectl create -f -
 ```
 
 以上就是k8s的一些基本命令
-
-作者：理想枫林晚
-
-链接：https://www.jianshu.com/p/304c629d127c
-
-来源：简书
-
-著作权归作者所有。商业转载请联系作者获得授权，非商业转载请注明出处。
 
 
 
