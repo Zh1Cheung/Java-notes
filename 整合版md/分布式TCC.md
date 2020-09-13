@@ -220,27 +220,41 @@ TCC 分为三个阶段，即 Try、Confirm、Cancel 三个阶段。
 
 
 
-
 # Tyloo（概念介绍）
 
-## 概念
 
-- TCC事务机制相对于传统事务机制（X/Open XA Two-Phase-Commit），其特征在于它不依赖资源管理器(RM)对XA的支持，而是通过对（由业务系统提供的）业务逻辑的调度来实现分布式事务。 
-  - 对于业务系统中一个特定的业务逻辑S，其对外提供服务时，必须接受一些不确定性，即对业务逻辑执行的一次调用仅是一个临时性操作，调用它的消费方服务M保留了后续的取消权。如果M认为全局事务应该rollback，它会要求取消之前的临时性操作，这将对应S的一个取消操作；而当M认为全局事务应该commit时，它会放弃之前临时性操作的取消权，这对应S的一个确认操作。 
-  - **每一个初步操作，最终都会被确认或取消**。因此，针对一个具体的业务服务，TCC事务机制需要业务系统提供三段业务逻辑：初步操作Try、确认操作Confirm、取消操作Cancel
-- [传统事务机制]的业务逻辑 = [TCC事务机制]的初步操作（Try） + [TCC事务机制]的确认逻辑（Confirm）。
-- **初步操作（Try）**
-  - TCC事务机制以初步操作（Try）为中心的，确认操作（Confirm）和取消操作（Cancel）都是围绕初步操作（Try）而展开。因此，Try阶段中的操作，其保障性是最好的，即使失败，仍然有取消操作（Cancel）可以将其不良影响进行回撤。
-- **确认操作（Confirm）**
-  - 确认操作（Confirm）是对初步操作（Try）的一个补充。当TCC事务管理器决定commit全局事务时，就会逐个执行初步操作（Try）指定的确认操作（Confirm），将初步操作（Try）未完成的事项最终完成。
-- **取消操作（Cancel）**
-  - 取消操作（Cancel）是对初步操作（Try）的一个回撤。当TCC事务管理器决定rollback全局事务时，就会逐个执行初步操作（Try）指定的取消操作（Cancel），将初步操作（Try）已完成的事项全部撤回。
-- 在TCC事务机制中的业务逻辑处理和事务处理，其关系就错综复杂：业务逻辑（Try/Confirm/Cancel）阶段涉及所参与资源事务的commit/rollback；全局事务commit/rollback时又涉及到业务逻辑（Try/Confirm/Cancel）的执行
 
-- TCC全局事务必须基于RM本地事务来实现全局事务
-  - TCC服务是由Try/Confirm/Cancel业务构成的，其Try/Confirm/Cancel业务在执行时，会访问资源管理器（Resource Manager，下文简称RM）来存取数据。这些存取操作，必须要参与RM本地事务，以使其更改的数据要么全部commit，要么全部rollback
-  - 基于RM本地事务的TCC事务，这种情况则会很容易处理：[B:Try]操作中途执行失败，TCC事务框架将其参与RM本地事务直接rollback即可。后续TCC事务框架决定回滚全局事务时，在知道“[B:Try]操作涉及的RM本地事务已经rollback”的情况下，根本无需执行[B:Cancel]操作。
-  - 基于RM本地事务实现TCC事务框架时，一个TCC型服务的Cancel业务要么执行，要么不执行，不需要考虑部分执行的情况。
+## 功能
+
+- 支持 `Dubbo`RPC框架进行分布式事务
+
+- 支持事务异常回滚，超时异常恢复，防止事务悬挂
+
+- 事务日志存储支持 `mysql`,, `mongodb`, `redis`, `zookeeper` 等方式
+
+- 高性能，支持微服务集群部署
+
+  
+
+
+
+## 改进性能
+
+
+ 可以使用RedisTransactionRepository来存储事务日子, 另外可以设置confirm或cancel是异步执行，不会影响事务的一致性（可获取1.2.3.6版本，@Compensable属性增加了asyncConfirm,asyncCancel属性
+
+
+serializer可以设置为KryoPoolSerializer，以优化序列化性能
+
+采用disruptor框架进行事务日志的异步读
+
+提供后台管理可视化,以及metrics相关性能监控
+
+提供零侵入的`spring namespace`, `springboot` 快速集成方式, 简单易用
+
+
+
+
 
 ## 项目概念
 
@@ -260,6 +274,217 @@ TCC 分为三个阶段，即 Try、Confirm、Cancel 三个阶段。
   - 本质上而言，TCC 是一种设计模式，也就是一种理念，它没有与任何技术（或实现）耦合，也不受限于任何技术，对所有的技术方案都是适用的。
   - 最后，我想补充的是，因为 TCC 是在业务代码中编码实现的，所以，TCC 可以跨数据库、跨业务系统实现资源管理，满足复杂业务场景下的事务需求，比如，TCC 可以将对不同的数据库、不同业务系统的多个操作通过编码方式，转换为一个原子操作，实现事务。
   - 另外，因为 TCC 的每一个操作对于数据库来讲，都是一个本地数据库事务，那么当操作结束时，本地数据库事务的执行也就完成了，所以相关的数据库资源也就被释放了，这就能避免数据库层面的二阶段提交协议长时间锁定资源，导致系统性能低下的问题。
+
+
+
+## **业务场景介绍**
+
+ 咱们先来看看业务场景，假设你现在有一个电商系统，里面有一个支付订单的场景。
+
+ 那对一个订单支付之后，我们需要做下面的步骤：
+
+- 更改订单的状态为“已支付”
+- 扣减商品库存
+- 给会员增加积分
+- 创建销售出库单通知仓库发货
+
+ 这是一系列比较真实的步骤，无论大家有没有做过电商系统，应该都能理解。
+
+ ![img](https://img2018.cnblogs.com/blog/918692/201811/918692-20181123154323784-1697034217.png)
+
+ 
+
+
+
+ 上述这几个步骤，要么一起成功，要么一起失败，**必须是一个整体性的事务**。 
+
+但是如果你不用TCC分布式事务方案的话，就用个Spring Cloud开发这么一个微服务系统，很有可能会干出这种事儿来。 
+
+所以说，**我们有必要使用TCC分布式事务机制来保证各个服务形成一个整体性的事务。**
+
+ 上面那几个步骤，要么全部成功，如果任何一个服务的操作失败了，就全部一起回滚，撤销已经完成的操作。
+
+ 比如说库存服务要是扣减库存失败了，那么订单服务就得撤销那个修改订单状态的操作，然后得停止执行增加积分和通知出库两个操作。
+
+ 说了那么多，老规矩，给大家上一张图，大伙儿顺着图来直观的感受一下。
+
+![img](https://img2018.cnblogs.com/blog/918692/201811/918692-20181123154449362-184004902.png)
+
+ 
+
+##  **落地实现TCC分布式事务**
+
+ 那么现在到底要如何来实现一个TCC分布式事务，使得各个服务，要么一起成功？要么一起失败呢？
+
+ 大家稍安勿躁，我们这就来一步一步的分析一下。咱们就以一个Spring Cloud开发系统作为背景来解释。
+
+ 
+
+###  **1、TCC实现阶段一：Try**
+
+ 首先，订单服务那儿，他的代码大致来说应该是这样子的：
+
+ ![img](https://img2018.cnblogs.com/blog/918692/201811/918692-20181123154530434-790705908.png)
+
+ 
+
+如果你之前看过Spring Cloud架构原理那篇文章，同时对Spring Cloud有一定的了解的话，应该是可以理解上面那段代码的。
+
+ **其实就是订单服务完成本地数据库操作之后，通过Spring Cloud的Feign来调用其他的各个服务罢了。**
+
+ **但是光是凭借这段代码，是不足以实现TCC分布式事务的啊**？我们对这个订单服务修改点儿代码
+
+ 首先，上面那个订单服务先把自己的状态修改为：**OrderStatus.UPDATING**。
+
+ 这是啥意思呢？也就是说，在pay()那个方法里，你别直接把订单状态修改为已支付啊！你先把订单状态修改为**UPDATING**，也就是修改中的意思。
+
+ 这个状态是个没有任何含义的这么一个状态，代表有人正在修改这个状态罢了。
+
+ 然后呢，库存服务直接提供的那个reduceStock()接口里，也别直接扣减库存啊，你可以是**冻结掉库存**。
+
+ 举个例子，本来你的库存数量是100，你别直接100 - 2 = 98，扣减这个库存！
+
+ 你可以把可销售的库存：100 - 2 = 98，设置为98没问题，然后在一个单独的冻结库存的字段里，设置一个2。也就是说，有2个库存是给冻结了。
+
+ 积分服务的addCredit()接口也是同理，别直接给用户增加会员积分。你可以先在积分表里的一个**预增加积分字段**加入积分。
+
+ 比如：用户积分原本是1190，现在要增加10个积分，别直接1190 + 10 = 1200个积分啊！
+
+ 你可以保持积分为1190不变，在一个预增加字段里，比如说prepare_add_credit字段，设置一个10，表示有10个积分准备增加。
+
+ 仓储服务的saleDelivery()接口也是同理啊，你可以先创建一个销售出库单，但是这个销售出库单的状态是“**UNKNOWN**”。
+
+ 也就是说，刚刚创建这个销售出库单，此时还不确定他的状态是什么呢！
+
+ 上面这套改造接口的过程，其实就是所谓的TCC分布式事务中的第一个T字母代表的阶段，也就是**Try阶段**。
+
+ **总结上述过程，如果你要实现一个TCC分布式事务，首先你的业务的主流程以及各个接口提供的业务含义，不是说直接完成那个业务操作，而是完成一个Try的操作。**
+
+ **这个操作，一般都是锁定某个资源，设置一个预备类的状态，冻结部分数据，等等，大概都是这类操作。**
+
+ 咱们来一起看看下面这张图，结合上面的文字，再来捋一捋这整个过程。
+
+ 
+
+![img](https://img2018.cnblogs.com/blog/918692/201811/918692-20181123154627825-1811880105.png)
+
+ 
+
+ 
+
+### **2、TCC实现阶段二：Confirm**
+
+ 
+
+然后就分成两种情况了，第一种情况是比较理想的，那就是各个服务执行自己的那个Try操作，都执行成功了，bingo！
+
+ 这个时候，就需要依靠**TCC分布式事务框架**来推动后续的执行了。
+
+ 否则的话，感知各个阶段的执行情况以及推进执行下一个阶段的这些事情，不太可能自己手写实现，太复杂了。
+
+ 如果你在各个服务里引入了一个TCC分布式事务的框架，**订单服务里内嵌的那个TCC分布式事务框架可以感知到**，各个服务的Try操作都成功了。
+
+ 此时，TCC分布式事务框架会控制进入TCC下一个阶段，第一个C阶段，也就是**Confirm阶段**。
+
+ 为了实现这个阶段，你需要在各个服务里再加入一些代码。
+
+ 比如说，**订单服务**里，你可以加入一个Confirm的逻辑，就是正式把订单的状态设置为“已支付”了，大概是类似下面这样子：
+
+ ![img](https://img2018.cnblogs.com/blog/918692/201811/918692-20181123154705929-276762080.png) 
+
+**库存服务**也是类似的，你可以有一个InventoryServiceConfirm类，里面提供一个reduceStock()接口的Confirm逻辑，这里就是将之前冻结库存字段的2个库存扣掉变为0。
+
+ 这样的话，可销售库存之前就已经变为98了，现在冻结的2个库存也没了，那就正式完成了库存的扣减。
+
+ **积分服务**也是类似的，可以在积分服务里提供一个CreditServiceConfirm类，里面有一个addCredit()接口的Confirm逻辑，就是将预增加字段的10个积分扣掉，然后加入实际的会员积分字段中，从1190变为1120。
+
+ **仓储服务**也是类似，可以在仓储服务中提供一个WmsServiceConfirm类，提供一个saleDelivery()接口的Confirm逻辑，将销售出库单的状态正式修改为“已创建”，可以供仓储管理人员查看和使用，而不是停留在之前的中间状态“UNKNOWN”了。
+
+ **好了，上面各种服务的Confirm的逻辑都实现好了，一旦订单服务里面的TCC分布式事务框架感知到各个服务的Try阶段都成功了以后，就会执行各个服务的Confirm逻辑。**
+
+ **订单服务内的TCC事务框架会负责跟其他各个服务内的TCC事务框架进行通信，依次调用各个服务的Confirm逻辑。然后，正式完成各个服务的所有业务逻辑的执行。**
+
+ 同样，给大家来一张图，顺着图一起来看看整个过程。
+
+ ![img](https://img2018.cnblogs.com/blog/918692/201811/918692-20181123154740015-430603121.png)
+
+ 
+
+### **3、TCC实现阶段三：Cancel**
+
+ 好，这是比较正常的一种情况，那如果是异常的一种情况呢？
+
+ 举个例子：在Try阶段，比如积分服务吧，他执行出错了，此时会怎么样？
+
+ 那订单服务内的TCC事务框架是可以感知到的，然后他会决定对整个TCC分布式事务进行回滚。
+
+ 也就是说，会执行各个服务的**第二个C阶段，Cancel阶段**。
+
+ 同样，为了实现这个Cancel阶段，各个服务还得加一些代码。
+
+ 首先**订单服务**，他得提供一个OrderServiceCancel的类，在里面有一个pay()接口的Cancel逻辑，就是可以将订单的状态设置为“CANCELED”，也就是这个订单的状态是已取消。
+
+ **库存服务**也是同理，可以提供reduceStock()的Cancel逻辑，就是将冻结库存扣减掉2，加回到可销售库存里去，98 + 2 = 100。
+
+ **积分服务**也需要提供addCredit()接口的Cancel逻辑，将预增加积分字段的10个积分扣减掉。
+
+ **仓储服务**也需要提供一个saleDelivery()接口的Cancel逻辑，将销售出库单的状态修改为“CANCELED”设置为已取消。
+
+ 然后这个时候，订单服务的TCC分布式事务框架只要感知到了任何一个服务的Try逻辑失败了，就会跟各个服务内的TCC分布式事务框架进行通信，然后调用各个服务的Cancel逻辑。
+
+ 大家看看下面的图，直观的感受一下。
+
+![img](https://img2018.cnblogs.com/blog/918692/201811/918692-20181123154820466-2112179693.png)
+
+  
+
+## **总结与思考**
+
+ 总结一下，你要玩儿TCC分布式事务的话：
+
+ **首先需要选择某种TCC分布式事务框架**，各个服务里就会有这个TCC分布式事务框架在运行。
+
+ **然后你原本的一个接口，要改造为3个逻辑，Try-Confirm-Cancel**。
+
+ 
+
+- 先是服务调用链路依次执行Try逻辑
+
+- 如果都正常的话，TCC分布式事务框架推进执行Confirm逻辑，完成整个事务
+
+- 如果某个服务的Try逻辑有问题，TCC分布式事务框架感知到之后就会推进执行各个服务的Cancel逻辑，撤销之前执行的各种操作
+
+ 这就是所谓的**TCC分布式事务。**
+
+ 
+
+ 
+
+TCC分布式事务的核心思想，说白了，就是当遇到下面这些情况时，
+
+ 
+
+- 某个服务的数据库宕机了
+
+- 某个服务自己挂了
+
+- 那个服务的redis、elasticsearch、MQ等基础设施故障了
+
+- 某些资源不足了，比如说库存不够这些
+
+ 
+
+先来Try一下，不要把业务逻辑完成，先试试看，看各个服务能不能基本正常运转，能不能先冻结我需要的资源。
+
+ 如果Try都ok，也就是说，底层的数据库、redis、elasticsearch、MQ都是可以写入数据的，并且你保留好了需要使用的一些资源（比如冻结了一部分库存）。
+
+ 接着，再执行各个服务的Confirm逻辑，基本上Confirm就可以很大概率保证一个分布式事务的完成了。
+
+ 那如果Try阶段某个服务就失败了，比如说底层的数据库挂了，或者redis挂了，等等。
+
+ 此时就自动执行各个服务的Cancel逻辑，把之前的Try逻辑都回滚，所有服务都不要执行任何设计的业务逻辑。**保证大家要么一起成功，要么一起失败**。
+
+
 
 ### seata
 
@@ -1532,15 +1757,9 @@ version的问题，在doUpdate的时候，sql脚本是有对当前的version做�
   
   先doUpdate 改状态，就是作者所得乐观锁，改成功了 返回1 正常执行流程，改失败了，会抛出OptimisticLockException异常
   
-    ```
-  
-    ```
-  
 - 严重BUG:主服务调用从服务，主服务出现异常，从服务为什么不回滚
 
   -  看看是不是配置有问题，主服务异常，在主服务内从服务如果都没被执行，那就是说从服务没有被加入到整个事务中，也就不会回滚了。
-
-
 
 - 在调confirm及cancle方法时，如果判断事务不存在，即从未做过或已经处理完了，则直接跳过
 
@@ -1554,438 +1773,6 @@ version的问题，在doUpdate的时候，sql脚本是有对当前的version做�
   在CompensableTransactionInterceptor拦截器主事务方法执行完毕后，
   transactionManager.cleanAfterCompletion(transaction);
   未执行ThreadLocal的remove方法，会导致内存泄漏。
-
-## 优化
-
-如何改进性能
-
-
- 可以使用RedisTransactionRepository来存储事务日子, 另外可以设置confirm或cancel是异步执行，不会影响事务的一致性（可获取1.2.3.6版本，@Compensable属性增加了asyncConfirm,asyncCancel属性
-
-
-serializer可以设置为KryoPoolSerializer，以优化序列化性能
-
-采用disruptor框架进行事务日志的异步读
-
-
-
-# 配置
-
-tcc-transaction不和底层使用的rpc框架耦合，也就是使用dubbo,thrift,web service,http等都可。tcc-transaction-http-sample示例演示了不依赖底层rpc框架情况下如何使用tcc-transaction。
-
-在底层rpc框架为dubbo情况下，可利用tcc-trnansaction-dubbo jar提供的便利，方便应用使用tcc-transaction。tcc-transaction-dubbo-sample示例演示了在使用dubbo作为rpc调用情况下如何使用tcc-transaction。
-
-示例演示在下完订单后,使用红包帐户和资金帐户来付款，红包帐户服务和资金帐户服务在不同的系统中。示例中，有两个SOA提供方，一个是CapitalTradeOrderService，代表着资金帐户服务,另一个是RedPacketTradeOrderService,代表着红包帐户服务。
-
-下完订单后，订单状态为DRAFT，在TCC事务中TRY阶段，订单支付服务将订单状态变成PAYING，同时远程调用红包帐户服务和资金帐户服务,将付款方的余额减掉（预留业务资源);如果在TRY阶段，任何一个服务失败，tcc-transaction将自动调用这些服务对应的cancel方法，订单支付服务将订单状态变成PAY_FAILED,同时远程调用红包帐户服务和资金帐户服务,将付款方余额减掉的部分增加回去；如果TRY阶段正常完成，则进入CONFIRM阶段，在CONFIRM阶段（tcc-transaction自动调用）,订单支付服务将订单状态变成CONFIRMED,同时远程调用红包帐户服务和资金帐户服务对应的CONFIRM方法，将收款方的余额增加。特别说明下，由于是示例，在CONFIRM和CANCEL方法中没有实现幂等性，如果在真实项目中使用，需要保证CONFIRM和CANCEL方法的幂等性。
-
-在运行sample前，需搭建好db环境，运行dbscripts目录下的create_db.sql建立数据库实例及表；还需修改各种项目中jdbc.properties文件中的jdbc连接信息。
-
-Try: 尝试执行业务
-
-```
-完成所有业务检查（一致性）
-
-预留必须业务资源（准隔离性）
-```
-
-Confirm: 确认执行业务
-
-```
-真正执行业务
-
-不作任何业务检查
-
-只使用Try阶段预留的业务资源
-
-Confirm操作满足幂等性
-```
-
-Cancel: 取消执行业务
-
-```
-释放Try阶段预留的业务资源
-
-Cancel操作满足幂等性
-```
-
-
-
-
-
-# 配置tcc-transaction
-
-1 引用tcc-transaction
-
-在服务调用方和提供方项目中需要引用tcc-transaction-spring jar包，如使用maven依赖：
-
-```
-    <dependency>
-        <groupId>org.mengyun</groupId>
-        <artifactId>tcc-transaction-spring</artifactId>
-        <version>${project.version}</version>
-    </dependency>
-```
-
-2 加载tcc-transaction.xml配置
-
-启动应用时，需要将tcc-transaction-spring jar中的tcc-transaction.xml加入到classpath中。如在web.xml中配置：
-
-```
-<context-param>
-    <param-name>contextConfigLocation</param-name>
-    <param-value>classpath:tcc-transaction.xml
-    </param-value>
-</context-param>
-```
-
-3 设置TransactionRepository
-
-需要为参与事务的应用项目配置一个TransactionRepository，tcc-transaction框架使用transactionRepository持久化事务日志。可以选择FileSystemTransactionRepository、SpringJdbcTransactionRepository、RedisTransactionRepository或ZooKeeperTransactionRepository。
-
-使用SpringJdbcTransactionRepository配置示例如下：
-
-```
-<bean id="transactionRepository"
-      class="org.mengyun.tcctransaction.spring.repository.SpringJdbcTransactionRepository">
-    <property name="dataSource" ref="dataSource"/>
-</bean>
-
-<bean id="dataSource" class="org.apache.commons.dbcp.BasicDataSource"
-      destroy-method="close">
-    <property name="driverClassName" value="com.mysql.jdbc.Driver"/>
-    <property name="url" value="jdbc:mysql://127.0.0.1:3306/test"/>
-    <property name="username" value="root"/>
-    <property name="password" value=""/>
-</bean>
-```
-
-特别提示，dataSource需要单独配置，不能和业务里使用的dataSource复用,即使使用的是同一个数据库。
-
-使用RedisTransactionRepository配置示例如下(需配置redis服务器为AOF模式并在redis.conf中设置appendfsync为always以防止日志丢失)：
-
-```
-<bean id="transactionRepository" class="org.mengyun.tcctransaction.repository.RedisTransactionRepository">
-<property name="keyPrefix" value="tcc_ut_"/>
-<property name="jedisPool" ref="jedisPool"/>
-</bean>
-
-<bean id="jedisPoolConfig" class="redis.clients.jedis.JedisPoolConfig">
-<property name="maxTotal" value="1000"/>
-<property name="maxWaitMillis" value="1000"/>
-</bean>
-
-<bean id="jedisPool" class="redis.clients.jedis.JedisPool">
-<constructor-arg index="0" ref="jedisPoolConfig"/>
-<constructor-arg index="1" value="127.0.0.1"/>
-<constructor-arg index="2" value="6379" type="int"/>
-<constructor-arg index="3" value="1000" type="int"/>
-<!--<constructor-arg index="4" value="${redis.password}"/>-->
-</bean>
-```
-
-使用ZooKeeperTransactionRepository配置示例如下：
-
-```
-<bean id="transactionRepository"
-class="org.mengyun.tcctransaction.repository.ZooKeeperTransactionRepository">
-<!--<property name="zkServers" value="localhost:2181,localhost:2183,localhost:2185"/>-->
-<property name="zkServers" value="localhost:2181"/>
-<property name="zkTimeout" value="10000"/>
-<property name="zkRootPath" value="/tcc_ut"/>
-</bean>
-```
-
-使用FileSystemTransactionRepository配置如下（FileSystemTransactionRepository仅适用事务发布方或调用方应用节点为单节点场景，因为日志是存储在应用节点本地文件中）：
-
-```
-<bean id="transactionRepository" class="org.mengyun.tcctransaction.repository.FileSystemTransactionRepository">
-<property name="rootPath" value="/data/tcc"/>
-</bean>
-```
-
-4 设置恢复策略(可选）
-
-当Tcc事务异常后，恢复Job将会定期恢复事务。在Spring配置文件中配置RecoverConfig类型的Bean来设置恢复策略示例：
-
-```
-<bean class="org.mengyun.tcctransaction.spring.recover.DefaultRecoverConfig">
-    <property name="maxRetryCount" value="30"/>
-    <property name="recoverDuration" value="120"/>
-    <property name="cronExpression" value="0 */1 * * * ?"/>
-    <property name="delayCancelExceptions">
-        <util:set>
-            <value>com.alibaba.dubbo.remoting.TimeoutException</value>
-        </util:set>
-    </property>
-</bean>
-```
-
-其中maxRetryCount表示一个事务最多尝试恢复次数，超过将不再自动恢复，需要人工干预，默认是30次。
-
-recoverDuration表示一个事务日志当超过一定时间间隔后没有更新就会被认为是发生了异常，需要恢复，恢复Job将扫描超过这个时间间隔依旧没有更新的事务日志，并对这些事务进行恢复，时间单位是秒，默认是120秒。
-
-cronExpression表示恢复Job触发间隔配置，默认是0 */1 * * * ?。
-
-delayCancelExceptions(1.2.3版中新加的配置)表示系统发生了设置的异常时，主事务不立即rollback，而是由恢复job来执行事务恢复。通常需要将超时异常设置为delayCancelExceptions，这样可以避免因为服务调用时发生了超时异常，主事务如果立刻rollback, 但是从事务还没执行完，从而造成主事务rollback失败。示例中com.alibaba.dubbo.remoting.TimeoutException为底层rpc框架为dubbo，超时异常发生时框架抛出的超时异常类，需要将其加入delayCancelExceptions中。
-
-# 发布Tcc服务
-
-发布一个Tcc服务方法，可被远程调用并参与到Tcc事务中，发布Tcc服务方法有下面四个约束：
-
-1. 在服务提供方的实现方法上加上@Compensable注解，并设置注解的属性
-2. 服务方法第一个入参类型为org.mengyun.tcctransaction.api.TransactionContext
-3. 服务方法的入参能被序列化(默认使用jdk序列化机制，需要参数实现Serializable接口，可以设置repository的serializer属性自定义序列化实现)
-4. try方法、confirm方法和cancel方法入参类型须一样
-
-Compensable的属性包括propagation、confirmMethod、cancelMethod、transactionContextEditor。propagation可不用设置，框架使用缺省值；设置confirmMethod指定CONFIRM阶段的调用方法；设置cancelMethod指定CANCEL阶段的调用方法；设置transactionContextEditor为MethodTransactionContextEditor.class。与1.1.x版本不同，从1.2.x起，TransactionContext将提供可配置的传递方式，不再要求服务方法第一个org.mengyun.tcctransaction.api.TransactionContext类型的入参为预留入参，而是可以自定义逻辑将TransactionContext以显示或隐式传参方式在调用方和服务提供方间传递。tcc-transaction框架使用transactionContextEditor来实现获取和调用方向服务提供方传递TransactionContext。如果底层服务框架使用的是dubbo，可以设置transactionContextEditor为DubboTransactionContextEditor.class（在tcc-transaction-dubbo.jar中，使用dubbo隐式传参方式），如果TransactionContext通过服务提供方方法参数形式传递（正如1.1.x版实现），则可设置transactionContextEditor为MethodTransactionContextEditor.class（在tcc-transaction-core.jar中）。
-
-tcc-transaction将拦截加上了@Compensable注解的服务方法，并根据Compensalbe的confirmMethod和cancelMethod获取在CONFRIM阶段和CANCEL阶段需要调用的方法。注解属性tcc-transaction在调用confirmMethod或是cancelMethod时是根据发布Tcc服务的接口类在Spring的ApplicationContext中获取Tcc服务实例，并调用confirmMethod或cancelMethod指定方法。因此如果是使用动态代理的方式实现aop(默认方式）,则confirmMethod和cancelMethod需在接口类中声明，如果使用动态字节码技术实现aop（如指定aspectj-autoproxy的proxy-target-class属性为true,在1.2.1版本中，默认已设置为true),则无需在接口类中声明。
-
-tcc-transaction在执行服务过程中会将Tcc服务的上下文持久化，包括所有入参，内部默认实现为将入参使用jdk自带的序列化机制序列化为为byte流，所以需要实现Serializable接口（另外可选择Kryo序列化实现机制,可参考例子）。
-
-## 在tcc-transaction-http-capital中发布Tcc服务示例：
-
-try接口方法：
-
-```
- public String record(TransactionContext transactionContext, CapitalTradeOrderDto tradeOrderDto);
-```
-
-try实现方法：
-
-```
-@Compensable(confirmMethod = "confirmRecord", cancelMethod = "cancelRecord", transactionContextEditor = MethodTransactionContextEditor.class)
-public String record(TransactionContext transactionContext, CapitalTradeOrderDto tradeOrderDto) {
-```
-
-confirm方法：
-
-```
-public void confirmRecord(TransactionContext transactionContext, CapitalTradeOrderDto tradeOrderDto) {
-```
-
-cancel方法：
-
-```
-public void cancelRecord(TransactionContext transactionContext, CapitalTradeOrderDto tradeOrderDto) {
-```
-
-### 在tcc-transaction-http-redpacket中发布Tcc服务示例：
-
-try接口方法：
-
-```
-public String record(TransactionContext transactionContext, RedPacketTradeOrderDto tradeOrderDto);
-```
-
-try实现方法：
-
-```
-@Compensable(confirmMethod = "confirmRecord", cancelMethod = "cancelRecord", transactionContextEditor = MethodTransactionContextEditor.class)
-public String record(TransactionContext transactionContext, RedPacketTradeOrderDto tradeOrderDto) {
-```
-
-confirm方法：
-
-```
-public void confirmRecord(TransactionContext transactionContext, RedPacketTradeOrderDto tradeOrderDto) {
-```
-
-cancel方法：
-
-```
-public void cancelRecord(TransactionContext transactionContext, RedPacketTradeOrderDto tradeOrderDto) {
-```
-
-# 调用远程Tcc服务
-
-调用远程Tcc服务，将远程Tcc服务参与到本地Tcc事务中，本地的服务方法也需要声明为Tcc服务，与发布一个Tcc服务不同，本地Tcc服务方法有三个约束：
-
-1. 在服务方法上加上@Compensable注解,并设置注解属性
-2. 服务方法的入参都须能序列化(实现Serializable接口)
-3. try方法、confirm方法和cancel方法入参类型须一样
-
-与发布Tcc服务不同的是本地Tcc服务Compensable注解属性transactionContextEditor可以不用设置。
-
-本地服务通过远程tcc服务提供的client来调用，需要将这些tcc服务的client声明为可加入到TCC事务中，如tcc服务的client方法明为tryXXX,则需要在方法tryXXX上加上如下配置：
-
-```
-@Compensable(propagation = Propagation.SUPPORTS, confirmMethod = "tryXXX", cancelMethod = "tryXXX", transactionContextEditor = MethodTransactionContextEditor.class)
-```
-
-其中propagation = Propagation.SUPPORTS表示该方法支持参与到TCC事务中。 如果tcc服务的client为框架自动生成实现（比如代理机制实现）不能添加注解，可为该client实现一个代理类，在代理类的方法上加上注解。
-
-### 在tcc-transaction-http-order中调用远程Tcc服务示例：
-
-try方法：
-
-```
-@Compensable(confirmMethod = "confirmMakePayment",cancelMethod = "cancelMakePayment")
-public void makePayment(Order order, BigDecimal redPacketPayAmount, BigDecimal capitalPayAmount) {
-
-    System.out.println("order try make payment called");
-    order.pay(redPacketPayAmount, capitalPayAmount);
-    orderRepository.updateOrder(order);
-    capitalTradeOrderService.record(null, buildCapitalTradeOrderDto(order));
-    redPacketTradeOrderService.record(null, buildRedPacketTradeOrderDto(order));
-}
-```
-
-confirm方法：
-
-```
-public void confirmMakePayment(Order order, BigDecimal redPacketPayAmount, BigDecimal capitalPayAmount) {
-```
-
-cancel方法：
-
-```
-public void cancelMakePayment(Order order, BigDecimal redPacketPayAmount, BigDecimal capitalPayAmount) {
-```
-
-tcc服务提供的client方法增加注解：
-
-```
-@Compensable(propagation = Propagation.SUPPORTS, confirmMethod = "record", cancelMethod = "record", transactionContextEditor = MethodTransactionContextEditor.class)
-public String record(TransactionContext transactionContext, CapitalTradeOrderDto tradeOrderDto) {
-```
-
-# rpc框架为dubbo时以隐式传参方式配置
-
-rpc框架为dubbo时支持以隐式传参方式配置TCC事务。
-
-## 配置tcc-transaction
-
-与上面配置tcc-transaction一样，此外，还需要如下步骤：
-
-1. 引用tcc-transaction-dubbo 在项目中需要引用tcc-transaction-dubbo jar包，如使用maven依赖：
-
-   ```
-    <dependency>
-        <groupId>org.mengyun</groupId>
-        <artifactId>tcc-transaction-dubbo</artifactId>
-        <version>${project.version}</version>
-    </dependency>
-   ```
-
-2. 加载tcc-transaction-dubbo.xml配置
-
-需要将tcc-transaction-dubbo jar中的tcc-transaction-dubbo.xml加入到classpath中。如在web.xml中配置改为：
-
-```
-<context-param>
-    <param-name>contextConfigLocation</param-name>
-    <param-value>classpath:tcc-transaction.xml,classpath:tcc-transaction-dubbo.xml
-    </param-value>
- </context-param>
-```
-
-## 发布Tcc服务
-
-发布一个Tcc服务方法，可被远程调用并参与到Tcc事务中，发布支持隐式传参的Tcc服务方法有下面四个约束：
-
-1. 在服务提供方的实现方法上加上@Compensable注解，并设置注解的属性
-2. 在服务提供方的接口方法上加上@Compensable注解
-3. 服务方法的入参能被序列化(默认使用jdk序列化机制，需要参数实现Serializable接口，可以设置repository的serializer属性自定义序列化实现)
-4. try方法、confirm方法和cancel方法入参类型须一样
-
-Compensable的属性包括propagation、confirmMethod、cancelMethod、transactionContextEditor。propagation可不用设置，框架使用缺省值；设置confirmMethod指定CONFIRM阶段的调用方法；设置cancelMethod指定CANCEL阶段的调用方法；设置transactionContextEditor为DubboTransactionContextEditor.class。
-
-### 在tcc-transaction-dubbo-capital中发布Tcc服务示例：
-
-try接口方法：
-
-```
- @Compensable
-public String record(CapitalTradeOrderDto tradeOrderDto);
-```
-
-try实现方法：
-
-```
-@Compensable(confirmMethod = "confirmRecord", cancelMethod = "cancelRecord", transactionContextEditor = DubboTransactionContextEditor.class)
-public String record(CapitalTradeOrderDto tradeOrderDto) {
-```
-
-confirm方法：
-
-```
-public void confirmRecord(CapitalTradeOrderDto tradeOrderDto) {
-```
-
-cancel方法：
-
-```
-public void cancelRecord(CapitalTradeOrderDto tradeOrderDto) {
-```
-
-### 在tcc-transaction-dubbo-redpacket中发布Tcc服务示例：
-
-try接口方法：
-
-```
-@Compensable
-public String record(RedPacketTradeOrderDto tradeOrderDto);
-```
-
-try实现方法：
-
-```
-@Compensable(confirmMethod = "confirmRecord", cancelMethod = "cancelRecord", transactionContextEditor = DubboTransactionContextEditor.class)
-public String record(RedPacketTradeOrderDto tradeOrderDto) {
-```
-
-confirm方法：
-
-```
-public void confirmRecord(RedPacketTradeOrderDto tradeOrderDto) {
-```
-
-cancel方法：
-
-```
-public void cancelRecord(RedPacketTradeOrderDto tradeOrderDto) {
-```
-
-## 调用远程Tcc服务
-
-调用远程Tcc服务，将远程Tcc服务参与到本地Tcc事务中，本地的服务方法也需要声明为Tcc服务，声明方式与非隐式传参方式一样，有三个约束：
-
-1. 在服务方法上加上@Compensable注解,并设置注解属性
-2. 服务方法的入参都须能序列化(实现Serializable接口)
-3. try方法、confirm方法和cancel方法入参类型须一样
-
-本地服务通过远程tcc服务提供的client来调用，与非隐式传参方式不一样，无需要将这些tcc服务的client显示地声明为可加入到TCC事务中。
-
-### 在tcc-transaction-dubbo-order中调用远程Tcc服务示例：
-
-try方法：
-
-```
-@Compensable(confirmMethod = "confirmMakePayment", cancelMethod = "cancelMakePayment")
-public void makePayment(Order order, BigDecimal redPacketPayAmount, BigDecimal capitalPayAmount) {
-    System.out.println("order try make payment called.time seq:" + DateFormatUtils.format(Calendar.getInstance(), "yyyy-MM-dd HH:mm:ss"));
-
-    order.pay(redPacketPayAmount, capitalPayAmount);
-    orderRepository.updateOrder(order);
-
-    String result = capitalTradeOrderService.record(buildCapitalTradeOrderDto(order));
-    String result2 = redPacketTradeOrderService.record(buildRedPacketTradeOrderDto(order));
-}
-```
-
-confirm方法：
-
-```
-public void confirmMakePayment(Order order, BigDecimal redPacketPayAmount, BigDecimal capitalPayAmount) {
-```
-
-cancel方法：
-
-```
-public void cancelMakePayment(Order order, BigDecimal redPacketPayAmount, BigDecimal capitalPayAmount) {
-```
 
 
 
