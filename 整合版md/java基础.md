@@ -589,6 +589,8 @@ char：16位，存储Unicode码，用单引号赋值。
 
 
 
+
+
 ## equals()&&hascode
 
 - 在obj中的equals()和hashcode()是原始的，没有被重写的，且二者都与对象的地址有关，在String等包装类中，equals()和hashcode()是被重写了的，与对象的内容有关
