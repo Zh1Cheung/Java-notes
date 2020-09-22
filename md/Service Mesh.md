@@ -448,6 +448,7 @@
   - 配置sidecar让流量绕过代理
   - 配置Egress网关
 - 概念
+  
   - 定义了网格的出口点，允许你将监控、路由等功能应用于离开网格的流量
 - 应用场景
   - 所有出口流量必须流经一组专用节点（安全因素） 
@@ -887,6 +888,7 @@
 ## 单向TLS
 
 - 公钥基础设施 (PKI)
+  
   - Istio PKI 使用 X.509 证书为每个工作负载都提供强大的身份标识。可以大规模进行自动化密钥和证书轮换，伴随每个 Envoy 代理都运行着一个 `istio-agent` 负责证书和密钥的供应。
 - Istio 供应身份是通过 secret discovery service（SDS）来实现的，具体流程如下
   - CA 提供 gRPC 服务以接受[证书签名请求](https://en.wikipedia.org/wiki/Certificate_signing_request)（CSRs）。
@@ -1214,7 +1216,9 @@
 
 - 通过 ELK 完成 Envoy 日志的收集和检索
 
-## 分布式追踪工具
+
+
+
 
 
 
