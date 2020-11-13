@@ -521,7 +521,543 @@
     fmt.Println("END")
     ```
 
-    
+- 使用 Channel 容易犯的错误
+
+  - **使用 Channel 最常见的错误是 panic 和 goroutine 泄漏。**
+
+  - 首先，我们来总结下会 panic 的情况，总共有 3 种：
+
+    - close 为 nil 的 chan；
+    - send 已经 close 的 chan；
+    - close 已经 close 的 chan。
+
+  - goroutine 泄漏的问题也很常见，下面的代码也是一个实际项目中的例子：
+
+    - ```go
+      
+      // 在这个例子中，process 函数会启动一个 goroutine，去处理需要长时间处理的业务，处理完之后，会发送 true 到 chan 中，目的是通知其它等待的 goroutine，可以继续处理了。
+      func process(timeout time.Duration) bool {
+          ch := make(chan bool)
+      
+          go func() {
+              // 模拟处理耗时的业务
+              time.Sleep((timeout + time.Second))
+              ch <- true // block
+              fmt.Println("exit goroutine")
+          }()
+          select {
+          case result := <-ch:
+              return result
+          case <-time.After(timeout):
+              return false
+          }
+      }
+      ```
+
+    - 我们来看一下第 10 行到第 15 行，主 goroutine 接收到任务处理完成的通知，或者超时后就返回了。这段代码有问题吗？
+
+      - 如果发生超时，process 函数就返回了，这就会导致 unbuffered 的 chan 从来就没有被读取。我们知道，unbuffered chan 必须等 reader 和 writer 都准备好了才能交流，否则就会阻塞。超时导致未读，结果就是子 goroutine 就阻塞在第 7 行永远结束不了，进而导致 goroutine 泄漏。
+
+    - 解决这个 Bug 的办法很简单，就是将 unbuffered chan 改成容量为 1 的 chan，这样第 7 行就不会被阻塞了。
+
+- chan 的值和状态有多种情况，而不同的操作（send、recv、close）又可能得到不同的结果，这是使用 chan 类型时经常让人困惑的地方。
+
+  - 你一定要特别关注下那些 panic 的情况，另外还要掌握那些会 block 的场景，它们是导致死锁或者 goroutine 泄露的罪魁祸首。
+
+  - 还有一个值得注意的点是，**只要一个 chan 还有未读的数据，即使把它 close 掉，你还是可以继续把这些未读的数据消费完，之后才是读取零值数据。**
+
+  - |         | nil       | empty                | Full                   | Not full&empty         | Closed                         |
+    | ------- | --------- | -------------------- | ---------------------- | ---------------------- | ------------------------------ |
+    | receive | block     | block                | Read value             | Read value             | 返回未读的元素，读完后返回零值 |
+    | send    | block     | write value          | block                  | write value            | **panic**                      |
+    | close   | **panic** | closed，没有未读元素 | closed，保留未读的元素 | closed，保留未读的元素 | **panic**                      |
+
+- 透过代码看典型的应用模式
+
+  - 使用反射操作 Channel
+
+    - 如果需要处理三个 chan，你就可以再添加一个 case clause，用它来处理第三个 chan。可是，如果要处理 100 个 chan 呢？一万个 chan 呢？或者是，chan 的数量在编译的时候是不定的，在运行的时候需要处理一个 slice of chan，这个时候，也没有办法在编译前写成字面意义的 select。那该怎么办？
+
+    - 通过 reflect.Select 函数，你可以将一组运行时的 case clause 传入，当作参数执行。Go 的 select 是伪随机的，它可以在执行的 case 中随机选择一个 case，并把选择的这个 case 的索引（chosen）返回，如果没有可用的 case 返回，会返回一个 bool 类型的返回值，这个返回值用来表示是否有 case 成功被选择。如果是 recv case，还会返回接收的元素。
+
+    - ```go
+      
+      // 首先，createCases 函数分别为每个 chan 生成了 recv case 和 send case，并返回一个 reflect.SelectCase 数组。
+      // 然后，通过一个循环 10 次的 for 循环执行 reflect.Select，这个方法会从 cases 中选择一个 case 执行。第一次肯定是 send case，因为此时 chan 还没有元素，recv 还不可用。等 chan 中有了数据以后，recv case 就可以被选择了。这样，你就可以处理不定数量的 chan 了。
+      func main() {
+          var ch1 = make(chan int, 10)
+          var ch2 = make(chan int, 10)
+      
+          // 创建SelectCase
+          var cases = createCases(ch1, ch2)
+      
+          // 执行10次select
+          for i := 0; i < 10; i++ {
+              chosen, recv, ok := reflect.Select(cases)
+              if recv.IsValid() { // recv case
+                  fmt.Println("recv:", cases[chosen].Dir, recv, ok)
+              } else { // send case
+                  fmt.Println("send:", cases[chosen].Dir, ok)
+              }
+          }
+      }
+      
+      func createCases(chs ...chan int) []reflect.SelectCase {
+          var cases []reflect.SelectCase
+      
+      
+          // 创建recv case
+          for _, ch := range chs {
+              cases = append(cases, reflect.SelectCase{
+                  Dir:  reflect.SelectRecv,
+                  Chan: reflect.ValueOf(ch),
+              })
+          }
+      
+          // 创建send case
+          for i, ch := range chs {
+              v := reflect.ValueOf(i)
+              cases = append(cases, reflect.SelectCase{
+                  Dir:  reflect.SelectSend,
+                  Chan: reflect.ValueOf(ch),
+                  Send: v,
+              })
+          }
+      
+          return cases
+      }
+      ```
+
+- 典型的应用场景
+
+  - 消息交流
+
+    - 从 chan 的内部实现看，它是以一个循环队列的方式存放数据，所以，它有时候也会被当成线程安全的队列和 buffer 使用。一个 goroutine 可以安全地往 Channel 中塞数据，另外一个 goroutine 可以安全地从 Channel 中读取数据，goroutine 就可以安全地实现信息交流了。
+    - 第一个例子是 worker 池的例子。将用户的请求放在一个 chan Job 中，这个 chan Job 就相当于一个待处理任务队列。除此之外，还有一个 chan chan Job 队列，用来存放可以处理任务的 worker 的缓存队列。
+      - dispatcher 会把待处理任务队列中的任务放到一个可用的缓存队列中，worker 会一直处理它的缓存队列。通过使用 Channel，实现了一个 worker 池的任务处理中心，并且解耦了前端 HTTP 请求处理和后端任务处理的逻辑。
+      - worker 池的生产者和消费者的消息交流都是通过 Channel 实现的。
+    - 第二个例子是 etcd 中的 node 节点的实现，包含大量的 chan 字段，比如 recvc 是消息处理的 chan，待处理的 protobuf 消息都扔到这个 chan 中，node 有一个专门的 run goroutine 处理这些消息。
+
+  - 数据传递
+
+    - 有 4 个 goroutine，编号为 1、2、3、4。每秒钟会有一个 goroutine 打印出它自己的编号，要求你编写程序，让输出的编号总是按照 1、2、3、4、1、2、3、4……这个顺序打印出来。
+
+    - ```go
+      // 为了实现顺序的数据传递，我们可以定义一个令牌的变量，谁得到令牌，谁就可以打印一次自己的编号，同时将令牌传递给下一个 goroutine，我们尝试使用 chan 来实现，可以看下下面的代码。
+      
+      // 首先，我们定义一个令牌类型（Token），接着定义一个创建 worker 的方法，这个方法会从它自己的 chan 中读取令牌。哪个 goroutine 取得了令牌，就可以打印出自己编号，因为需要每秒打印一次数据，所以，我们让它休眠 1 秒后，再把令牌交给它的下家。
+      type Token struct{}
+      
+      func newWorker(id int, ch chan Token, nextCh chan Token) {
+          for {
+              token := <-ch         // 取得令牌
+              fmt.Println((id + 1)) // id从1开始
+              time.Sleep(time.Second)
+              nextCh <- token
+          }
+      }
+      func main() {
+          chs := []chan Token{make(chan Token), make(chan Token), make(chan Token), make(chan Token)}
+      
+          // 创建4个worker
+          for i := 0; i < 4; i++ {
+              go newWorker(i, chs[i], chs[(i+1)%4])
+          }
+      
+          //首先把令牌交给第一个worker
+          chs[0] <- struct{}{}
+        
+          select {}
+      }
+      ```
+
+  - 信号通知
+
+    - chan 类型有这样一个特点：**chan 如果为空，那么，receiver 接收数据的时候就会阻塞等待，直到 chan 被关闭或者有新的数据到来**。利用这个机制，我们可以实现 wait/notify 的设计模式。
+    - 传统的并发原语 Cond 也能实现这个功能，但是，Cond 使用起来比较复杂，容易出错，而使用 chan 实现 wait/notify 模式就方便很多了。
+    - 除了正常的业务处理时的 wait/notify，我们经常碰到的一个场景，就是程序关闭的时候，我们需要在退出之前做一些清理（doCleanup 方法）的动作。这个时候，我们经常要使用 chan。
+
+  - 锁
+
+    - **使用 chan 也可以实现互斥锁**。在 chan 的内部实现中，就有一把互斥锁保护着它的所有字段。从外在表现上，chan 的发送和接收之间也存在着 happens-before 的关系，保证元素放进去之后，receiver 才能读取到
+
+    - 要想使用 chan 实现互斥锁，至少有两种方式。**一种方式是先初始化一个 capacity 等于 1 的 Channel，然后再放入一个元素。这个元素就代表锁，谁取得了这个元素，就相当于获取了这把锁。**另一种方式是，先初始化一个 capacity 等于 1 的 Channel，它的“空槽”代表锁，谁能成功地把元素发送到这个 Channel，谁就获取了这把锁。
+
+    - ```go
+      // 第一种
+      // 使用chan实现互斥锁
+      type Mutex struct {
+          ch chan struct{}
+      }
+      
+      // 使用锁需要初始化
+      func NewMutex() *Mutex {
+          mu := &Mutex{make(chan struct{}, 1)}
+          mu.ch <- struct{}{}
+          return mu
+      }
+      
+      // 请求锁，直到获取到
+      func (m *Mutex) Lock() {
+          <-m.ch
+      }
+      
+      // 解锁
+      func (m *Mutex) Unlock() {
+          select {
+          case m.ch <- struct{}{}:
+          default:
+              panic("unlock of unlocked mutex")
+          }
+      }
+      
+      // 尝试获取锁
+      func (m *Mutex) TryLock() bool {
+          select {
+          case <-m.ch:
+              return true
+          default:
+          }
+          return false
+      }
+      
+      // 加入一个超时的设置
+      func (m *Mutex) LockTimeout(timeout time.Duration) bool {
+          timer := time.NewTimer(timeout)
+          select {
+          case <-m.ch:
+              timer.Stop()
+              return true
+          case <-timer.C:
+          }
+          return false
+      }
+      
+      // 锁是否已被持有
+      func (m *Mutex) IsLocked() bool {
+          return len(m.ch) == 0
+      }
+      
+      
+      func main() {
+          m := NewMutex()
+          ok := m.TryLock()
+          fmt.Printf("locked v %v\n", ok)
+          ok = m.TryLock()
+          fmt.Printf("locked %v\n", ok)
+      }
+      ```
+
+  - 任务编排
+
+    - Or-Done 模式
+
+      - Or-Done 模式是信号通知模式中更宽泛的一种模式
+
+      - 我们会使用“信号通知”实现某个任务执行完成后的通知机制，在实现时，我们为这个任务定义一个类型为 chan struct{}类型的 done 变量，等任务结束后，我们就可以 close 这个变量，然后，其它 receiver 就会收到这个通知。
+
+      - 这是有一个任务的情况，如果有多个任务，**只要有任意一个任务执行完，我们就想获得这个信号，这就是 Or-Done 模式。**
+
+      - 比如，你发送同一个请求到多个微服务节点，只要任意一个微服务节点返回结果，就算成功，这个时候，就可以参考下面的实现：
+
+      - ```go
+        
+        func or(channels ...<-chan interface{}) <-chan interface{} {
+            // 特殊情况，只有零个或者1个chan
+            switch len(channels) {
+            case 0:
+                return nil
+            case 1:
+                return channels[0]
+            }
+        
+            orDone := make(chan interface{})
+            go func() {
+                defer close(orDone)
+        
+                switch len(channels) {
+                case 2: // 2个也是一种特殊情况
+                    select {
+                    case <-channels[0]:
+                    case <-channels[1]:
+                    }
+                // 这里的实现使用了一个巧妙的方式，当 chan 的数量大于 2 时，使用递归的方式等待信号。
+                default: //超过两个，二分法递归处理
+                    m := len(channels) / 2
+                    select {
+                    case <-or(channels[:m]...):
+                    case <-or(channels[m:]...):
+                    }
+                }
+            }()
+        
+            return orDone
+        }
+        
+        
+        
+        // 反射的方法，我们也可以实现 Or-Done 模式：
+        func or(channels ...<-chan interface{}) <-chan interface{} {
+            //特殊情况，只有0个或者1个
+            switch len(channels) {
+            case 0:
+                return nil
+            case 1:
+                return channels[0]
+            }
+        
+            orDone := make(chan interface{})
+            go func() {
+                defer close(orDone)
+                // 利用反射构建SelectCase
+                var cases []reflect.SelectCase
+                for _, c := range channels {
+                    cases = append(cases, reflect.SelectCase{
+                        Dir:  reflect.SelectRecv,
+                        Chan: reflect.ValueOf(c),
+                    })
+                }
+        
+                // 随机选择一个可用的case
+                reflect.Select(cases)
+            }()
+        
+        
+            return orDone
+        }
+        
+        func sig(after time.Duration) <-chan interface{} {
+            c := make(chan interface{})
+            go func() {
+                defer close(c)
+                time.Sleep(after)
+            }()
+            return c
+        }
+        
+        
+        func main() {
+            start := time.Now()
+        
+            <-or(
+                sig(10*time.Second),
+                sig(20*time.Second),
+                sig(30*time.Second),
+                sig(40*time.Second),
+                sig(50*time.Second),
+                sig(01*time.Minute),
+            )
+        
+            fmt.Printf("done after %v", time.Since(start))
+        }
+        ```
+
+    - 扇入模式
+
+      - 对于我们这里的 Channel 扇入模式来说，就是指有**多个源 Channel 输入、一个目的 Channel 输出的情况**。扇入比就是源 Channel 数量比 1。
+
+      - 每个源 Channel 的元素都会发送给目标 Channel，相当于目标 Channel 的 receiver 只需要监听目标 Channel，就可以接收所有发送给源 Channel 的数据。
+
+      - ```go
+        // 反射的代码比较简短，易于理解，主要就是构造出 SelectCase slice，然后传递给 reflect.Select 语句。
+        
+        func fanInReflect(chans ...<-chan interface{}) <-chan interface{} {
+            out := make(chan interface{})
+            go func() {
+                defer close(out)
+                // 构造SelectCase slice
+                var cases []reflect.SelectCase
+                for _, c := range chans {
+                    cases = append(cases, reflect.SelectCase{
+                        Dir:  reflect.SelectRecv,
+                        Chan: reflect.ValueOf(c),
+                    })
+                }
+                
+                // 循环，从cases中选择一个可用的
+                for len(cases) > 0 {
+                    i, v, ok := reflect.Select(cases)
+                    if !ok { // 此channel已经close
+                        cases = append(cases[:i], cases[i+1:]...)
+                        continue
+                    }
+                    out <- v.Interface()
+                }
+            }()
+            return out
+        }
+        
+        // 递归模式也是在 Channel 大于 2 时，采用二分法递归 merge。
+        
+        func fanInRec(chans ...<-chan interface{}) <-chan interface{} {
+            switch len(chans) {
+            case 0:
+                c := make(chan interface{})
+                close(c)
+                return c
+            case 1:
+                return chans[0]
+            case 2:
+                return mergeTwo(chans[0], chans[1])
+            default:
+                m := len(chans) / 2
+                return mergeTwo(
+                    fanInRec(chans[:m]...),
+                    fanInRec(chans[m:]...))
+            }
+        }
+        ```
+
+    - 扇出模式
+
+      - ```go
+        // 下面是一个扇出模式的实现。从源 Channel 取出一个数据后，依次发送给目标 Channel。在发送给目标 Channel 的时候，可以同步发送，也可以异步发送：
+        
+        func fanOut(ch <-chan interface{}, out []chan interface{}, async bool) {
+            go func() {
+                defer func() { //退出时关闭所有的输出chan
+                    for i := 0; i < len(out); i++ {
+                        close(out[i])
+                    }
+                }()
+        
+                for v := range ch { // 从输入chan中读取数据
+                    v := v
+                    for i := 0; i < len(out); i++ {
+                        i := i
+                        if async { //异步
+                            go func() {
+                                out[i] <- v // 放入到输出chan中,异步方式
+                            }()
+                        } else {
+                            out[i] <- v // 放入到输出chan中，同步方式
+                        }
+                    }
+                }
+            }()
+        }
+        ```
+
+    - Stream
+
+      - ```go
+        // 把 Channel 当作流式管道使用的方式，也就是把 Channel 看作流（Stream），提供跳过几个元素，或者是只取其中的几个元素等方法。
+        func asStream(done <-chan struct{}, values ...interface{}) <-chan interface{} {
+            s := make(chan interface{}) //创建一个unbuffered的channel
+            go func() { // 启动一个goroutine，往s中塞数据
+                defer close(s) // 退出时关闭chan
+                for _, v := range values { // 遍历数组
+                    select {
+                    case <-done:
+                        return
+                    case s <- v: // 将数组元素塞入到chan中
+                    }
+                }
+            }()
+            return s
+        }
+        
+        // 以 takeN 为例来具体解释一下。
+        func takeN(done <-chan struct{}, valueStream <-chan interface{}, num int) <-chan interface{} {
+            takeStream := make(chan interface{}) // 创建输出流
+            go func() {
+                defer close(takeStream)
+                for i := 0; i < num; i++ { // 只读取前num个元素
+                    select {
+                    case <-done:
+                        return
+                     // https://stackoverflow.com/questions/60030756/what-does-it-mean-when-one-channel-uses-two-arrows-to-write-to-another-channel-i
+                    case takeStream <- <-valueStream: //从输入流中读取元素
+                    }
+                }
+            }()
+            return takeStream
+        }
+        ```
+
+      - 实现流的方法。
+
+        - takeN：只取流中的前 n 个数据；
+        - takeFn：筛选流中的数据，只保留满足条件的数据；
+        - takeWhile：只取前面满足条件的数据，一旦不满足条件，就不再取；
+        - skipN：跳过流中前几个数据；
+        - skipFn：跳过满足条件的数据；
+        - skipWhile：跳过前面满足条件的数据，一旦不满足条件，当前这个元素和以后的元素都会输出给 Channel 的 receiver。
+
+    - 和 Map-Reduce
+
+      - ```go
+        
+        func mapChan(in <-chan interface{}, fn func(interface{}) interface{}) <-chan interface{} {
+            out := make(chan interface{}) //创建一个输出chan
+            if in == nil { // 异常检查
+                close(out)
+                return out
+            }
+        
+            go func() { // 启动一个goroutine,实现map的主要逻辑
+                defer close(out)
+                for v := range in { // 从输入chan读取数据，执行业务操作，也就是map操作
+                    out <- fn(v)
+                }
+            }()
+        
+            return out
+        }
+        
+        
+        func reduce(in <-chan interface{}, fn func(r, v interface{}) interface{}) interface{} {
+            if in == nil { // 异常检查
+                return nil
+            }
+        
+            out := <-in // 先读取第一个元素
+            for v := range in { // 实现reduce的主要逻辑
+                out = fn(out, v)
+            }
+        
+            return out
+        }
+        
+        
+        // 生成一个数据流
+        func asStream(done <-chan struct{}) <-chan interface{} {
+            s := make(chan interface{})
+            values := []int{1, 2, 3, 4, 5}
+            go func() {
+                defer close(s)
+                for _, v := range values { // 从数组生成
+                    select {
+                    case <-done:
+                        return
+                    case s <- v:
+                    }
+                }
+            }()
+            return s
+        }
+        
+        func main() {
+            in := asStream(nil)
+        
+            // map操作: 乘以10
+            mapFn := func(v interface{}) interface{} {
+                return v.(int) * 10
+            }
+        
+            // reduce操作: 对map的结果进行累加
+            reduceFn := func(r, v interface{}) interface{} {
+                return r.(int) + v.(int)
+            }
+        
+            sum := reduce(mapChan(in, mapFn), reduceFn) //返回累加结果
+            fmt.Println(sum)
+        }
+        ```
+
+
+
+
 
 
 
