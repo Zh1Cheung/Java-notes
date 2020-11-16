@@ -81,7 +81,7 @@
        var myname // 声明部分
        myname = 'gek' // 赋值部分
        var myname = 'gek' // 变量的声明和赋值
-      
+        
       // 函数声明
       function foo(){
        console.log('foo') 
@@ -199,6 +199,223 @@
   
 
   
+
+
+
+# **作用域链和闭包**
+
+- **作用域链**
+
+  - ```javascript
+    function bar() {
+     console.log(myName) 
+    }
+     function foo() {
+     var myName = " abc "
+     bar()
+    }
+     var myName = " qaz " 
+    foo()
+    
+    ```
+
+  - 其实在每个执行上下文的变量环境中，都包含了一个外部引用，用来指向外部的执行上下文，我们把这个外部引用称为**outer**。
+
+    - 当一段代码使用了一个变量时，JavaScript 引擎首先会在“当前的执行上下文”中查找该变量，比如上面那段代码在查找 myName 变量时，如果在当前的变量环境中没有查找到，那么 JavaScript 引擎会继续在 outer 所指向的执行上下文中查找
+
+  - bar 函数和 foo 函数的 outer 都是指向全局上下文的，这也就意味着如 果在 bar 函数或者 foo 函数中使用了外部变量，那么 JavaScript 引擎会去全局执行上下文 中查找。我们把这个查找的链条就称为**作用域链**。
+
+- **词法作用域**
+
+  - 词法作用域就是指作用域是**由代码中函数声明的位置来决定的**，所以词法作用域是静态的作 用域，通过它就能够预测代码在执行过程中如何查找标识符。
+  - foo 函数调用的 bar 函数，那为什么 bar 函数的外部引用是全局执行上下文，而不是 foo 函数的执行上下 文?
+    - foo 和 bar 的上级作用域都是全局作用域，所以如果 foo 或者 bar 函数使用了一个它们没有定义的变量，那么它们会到全局作用域去查找。也就是说，**词法作用域是代码阶段就决定好的，和函数是怎么调用的没有关系**。
+
+- **块级作用域中的变量查找**
+
+  - 在编写代码的时候，如果你使用了一个在当前作用域中不存在的 变量，这时 JavaScript 引擎就需要按照作用域链在其他作用域中查找该变量。
+
+- **闭包**
+
+  - ```javascript
+    function foo() {
+    	var myName = " abc " 
+    	let test1 = 1
+    	const test2 = 2
+    	var innerBar = { 
+    		getName:function(){
+    			console.log(test1)
+      	  return myName
+    		},
+    		setName:function(newName){ 
+    			myName = newName
+    	}
+      return innerBar
+    } 
+    
+    var bar = foo()
+    bar.setName(" qaz ")
+    bar.getName()
+    console.log(bar.getName())
+    ```
+
+  - foo 函数执行完成之后，其执行上下文从栈顶弹出了，但是由于返回的 setName 和 getName 方法中使用了 foo 函数内部的变量 myName 和 test1，所以这两 个变量依然保存在内存中。
+
+  - **根据词法作用域的规则，内部函数 getName 和 setName 总是可以访问它们的外部函数 foo 中的变量**，所以当 innerBar 对象返回给全局变量 bar 时，虽然 foo 函数已经执行结 束，但是 getName 和 setName 函数依然可以使用 foo 函数中的变量 myName 和 test1。
+
+  - 在 JavaScript 中，根据词法作用域的 规则，内部函数总是可以访问其外部函数中声明的变量，当通过调用一个外部函数返回一个 内部函数后，即使该外部函数已经执行结束了，但是内部函数引用外部函数的变量依然保存在内存中，我们就把这些变量的集合称为闭包。**比如外部函数是 foo，那么这些变量的集合就称为 foo 函数的闭包。**
+
+- **闭包是怎么回收的**
+
+  - 通常，如果引用闭包的函数是一个**全局变量**，那么闭包会一直存在直到页面关闭;但如果这 个闭包以后不再使用的话，就会造成内存泄漏。
+  - 如果引用闭包的函数是个**局部变量**，等函数销毁后，在下次 JavaScript 引擎执行垃圾回收 时，判断闭包这块内容如果已经不再被使用了，那么 JavaScript 引擎的垃圾回收器就会回收这块内存。
+  - 所以在使用闭包的时候，你要尽量注意一个原则:**如果该闭包会一直使用，那么它可以作为 全局变量而存在;但如果使用频率不高，而且占用内存又比较大的话，那就尽量让它成为一 个局部变量**。
+
+
+
+
+
+
+
+# **this**
+
+- **在对象内部的方法中使用对象内部的属性是一 个非常普遍的需求**——**this 机制**
+
+- **JavaScript** **中的** **this** **是什么**
+
+  - 执行上下文中 包含了变量环境、词法环境、外部环境，但其实还有一个 this 没有提及
+  - **this 是和执行上下文绑定的**，也就是说每个执行上下文中都有一个 this
+
+- **全局执行上下文中的** **this**
+
+  - 全局执行上下文中的 this 是指向window 对象的。这也是 this 和作用域链的唯一交点，作用域链的最底端包含了 window 对象，全局执行上下文中的 this 也是指向 window 对象。
+
+- **函数执行上下文中的** **this**
+
+  - 我们在 foo 函数内部打印出来 this 值，执行这段代码，打印出来的也是 window 对象，这 说明在默认情况下调用一个函数，其执行上下文中的 this 也是指向 window 对象的。
+
+- 能不能设置执行上下文中的 this 来指向其他对象呢?通常情况下，有下面三种方式来设置函数执行上下文中的 this 值。
+
+  - **通过函数的** **call** **方法设置**
+
+    - 你可以通过函数的**call**方法来设置函数执行上下文的 this 指向
+
+    - ```javascript
+      let bar = {
+      	myName : " aaa ", 
+         test1 : 1
+      }
+      function foo(){
+      this.myName = " ccc " 
+      }
+      foo.call(bar)
+      console.log(bar)
+      console.log(myName)
+      ```
+
+  - **通过对象调用方法设置**
+
+    - ```javascript
+      var myObj = {
+      name : " aaa ", 
+        showThis: function(){
+          console.log(this)
+      	}
+      }
+      myObj.showThis()
+      ```
+
+    - 使用对象来调用其内部的一个方法，该方法的 this 是**指向对象本身**的。
+
+  - **通过构造函数中设置**
+
+    - ```javascript
+      function CreateObj(){
+      	this.name = " aaa " 
+      }
+      var myObj = new CreateObj()
+      ```
+
+    - 其实，当执行 new CreateObj() 的时候，JavaScript 引擎做了如下四件事:
+
+      - 首先创建了一个空对象 tempObj;
+      - 接着调用 CreateObj.call 方法，并将 tempObj 作为 call 方法的参数，这样当 CreateObj 的执行上下文创建时，它的 this 就指向了 tempObj 对象;
+      - 然后执行 CreateObj 函数，此时的 CreateObj 函数执行上下文中的 this 指向了 tempObj 对象;
+      - 最后返回 tempObj 对象。
+
+- this 的设计缺陷以及应对方案
+
+  - **嵌套函数中的** **this** **不会从外层函数中继承**
+
+    - ```javascript
+      // 函数 bar 中的 this 指向的是全局 window 对象，而函数 showThis 中的 this 指向的是 myObj 对象
+      var myObj = {
+      	name : " aaa ",
+        showThis: function(){
+      		console.log(this)
+      		function bar(){console.log(this)}}
+       		bar()
+       }
+      }
+      myObj.showThis()
+      ```
+
+    - **你可以通过小技巧来解决这个问题**，比如在 showThis 函数中**声明一个变量 self 用来 保存 this**
+
+    - **你也可以使用 ES6 中的箭头函数来解决这个问题**
+
+      - ```javascript
+        var myObj = {
+        name : " aaa ", 
+          showThis: function(){
+        		console.log(this) 
+            var bar = ()=>{
+        			this.name = " bbb " 
+              console.log(this)
+        		bar() 
+          }
+        }
+        myObj.showThis() 
+        console.log(myObj.name) 
+        console.log(window.name)
+        ```
+
+  - **普通函数中的** **this** **默认指向全局对象** **window**
+
+    - 如果要让函数执行上下文中的 this 指向某个对象，最好的方式是通过 call 方法来显示调用。
+    - 这个问题可以通过设置 JavaScript 的“严格模式”来解决。在严格模式下，默认执行一个 函数，其函数的执行上下文中的 this 值是 undefined，这就解决上面的问题了。
+
+
+
+
+
+# **栈空间和堆空间**
+
+- 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
