@@ -566,3 +566,185 @@ API 网关实现的注意事项：
 
 
 
+# 抓包
+
+- **抓取我们本地电脑与远端服务器通信时候所传递的数据包**
+- Network 面板记录页面上每个网络操作的相关信息，包括详细的耗时数据、HTTP 请求与响应标头和 Cookie
+
+结构：由五个窗格组成，如图
+
+
+
+![img](https://pic2.zhimg.com/80/v2-db7c344e230b41f719e727b542bdf151_1440w.jpg)
+
+
+
+1：**`Controls（控件）`** 使用这些选项可以控制 Network(网络)面板的外观和功能
+
+
+
+![img](https://pic3.zhimg.com/80/v2-c95a73ba3432ac83685dc31587e8ae12_1440w.jpg)
+
+
+
+2：**`Filters（过滤器）`**
+
+**`使用这些选项可以控制在请求列表中显示哪些资源`**
+
+
+
+**`提示：按住Ctrl（Window / Linux），然后点击过滤器可以同时选择多个过滤器。`**
+
+**`此外，筛选框可以实现很多定制化的筛选，比如字符串匹配，关键词筛选等，其中关键词筛选主要有如下几种：`**
+
+
+
+- **`domain`**：仅显示来自指定域的资源。您可以使用通配符（*）来包括多个域。例如，*.com显示以.com结尾的所有域名中的资源。 DevTools会在自动完成下拉菜单中自动填充它遇到的所有域。
+- **`has-response-header`**：显示包含指定HTTP响应头信息的资源。 DevTools会在自动完成下拉菜单中自动填充它遇到的所有响应头。
+- **`is`**：通过is:running找出WebSocket请求。
+- **`larger-than(大于)`** ：显示大于指定大小的资源（以字节为单位）。设置值1000等效于设置值1k。
+- **`method(方法)`** ：显示通过指定的HTTP方法类型检索的资源。DevTools使用它遇到的所有HTTP方法填充下拉列表。
+- **`mime-type（mime类型`**：显示指定MIME类型的资源。 DevTools使用它遇到的所有MIME类型填充下拉列表。
+- **`mixed-content（混合内容`**：显示所有混合内容资源（mixed-content:all）或仅显示当前显示的内容（mixed-content:displayed）。
+- **`Scheme（协议）`**：显示通过不受保护的HTTP（scheme:http）或受保护的HTTPS（scheme:https）检索的资源。
+- **`set-cookie-domain（cookie域）`**：显示具有Set-Cookie头,并且其Domain属性与指定值匹配的资源。DevTools会在自动完成下拉菜单中自动填充它遇到的所有Cookie域。
+- **`set-cookie-name（cookie名）`**：显示具有Set-Cookie头,并且名称与指定值匹配的资源。DevTools会在自动完成下拉菜单中自动填充它遇到的所有Cookie名。
+- **`set-cookie-value（cookie值）`**：显示具有Set-Cookie头,并且值与指定值匹配的资源。DevTools会在自动完成下拉菜单中自动填充它遇到的所有cookie值。
+- **`status-code（状态码）`**：仅显示其HTTP状态代码与指定代码匹配的资源。DevTools会在自动完成下拉菜单中自动填充它遇到的所有状态码。
+
+![img](https://pic3.zhimg.com/80/v2-602e6d178e72a8df38106f95c4538c4a_1440w.jpg)
+
+
+
+3：**`Overview（概览）`**
+
+这个图表显示检索资源的时间轴。如果您看到多个垂直堆叠的栏，这意味着这些资源被同时检索。
+
+4：**`Requests Table（请求列表）`**
+
+此列表列出了检索的每个资源。默认情况下，此表按时间顺序排序，也就是最早的资源在顶部。单击资源名称可以获得更多信息。提示：右键单击列表的任何标题栏可以以添加或删除信息列。
+
+**`查看单个资源的详细信息`**
+
+点击资源名称（位于 Requests Table 的 Name 列下）可以查看与该资源有关的更多信息。
+
+可用标签会因您所选择资源类型的不同而不同，但下面四个标签最常见：
+
+- **[Headers](https://link.zhihu.com/?target=https%3A//static.dcxueyuan.com/content/disk/train/other/27973d34-2af3-481d-9a97-8850a177d266.html%23jump1)**：与资源关联的 HTTP 标头。
+- **[Preview](https://link.zhihu.com/?target=https%3A//static.dcxueyuan.com/content/disk/train/other/27973d34-2af3-481d-9a97-8850a177d266.html%23jump2)**：JSON、图像和文本资源的预览。
+- **[Response](https://link.zhihu.com/?target=https%3A//static.dcxueyuan.com/content/disk/train/other/27973d34-2af3-481d-9a97-8850a177d266.html%23jump3)**：HTTP 响应数据（如果存在）。
+- **`Timing`**：资源请求生命周期的精细分解。
+
+**`Headers（查看 HTTP 标头）`** 点击 **`Headers`** 可以显示该资源的标头。 **`Headers`** 标签可以显示资源的请求网址、HTTP 方法以及响应状态代码。 此外，该标签还会列出 HTTP 响应和请求标头、它们的值以及任何查询字符串参数
+
+
+
+![img](https://pic3.zhimg.com/80/v2-4f93efd5f2b8a7257d9f2da1b95d6dc2_1440w.jpg)
+
+
+
+**`点击每一部分旁边的 view source 或 view parsed 链接，您能够以源格式或者解析格式查看响应标头、请求标头或者查询字符串参数。`**
+
+
+
+**`Response（查看 HTTP 响应内容）`**
+点击 Response 标签可以查看资源未格式化的 HTTP 响应内容。 Preview 标签可能包含一些有用的信息，也可能不包含，具体取决于您所选择资源的类型。
+
+
+
+![img](https://pic1.zhimg.com/80/v2-5be61980a4c589fb7e740a2880ed0a74_1440w.jpg)
+
+
+
+**`查看 Cookie`**
+点击 Cookies 标签可以查看在资源的 HTTP 请求和响应标头中传输的 Cookie 表。 只有传输 Cookie 时，此标签才可用。
+下面是 Cookie 表中每一列的说明：
+
+- Name：Cookie 的名称。
+- Value：Cookie 的值。
+- Domain：Cookie 所属的域。
+- Path：Cookie 来源的网址路径。
+- Expires / Max-Age：Cookie 的 expires 或 max-age 属性的值。
+- Size：Cookie 的大小（以字节为单位）。
+- HTTP：指示 Cookie 应仅由浏览器在 HTTP 请求中设置，而无法通过 JavaScript 访问。
+- Secure：如果存在此属性，则指示 Cookie 应仅通过安全连接传输。
+
+
+
+![img](https://pic1.zhimg.com/80/v2-95a59627d85bcd163e8fc4718b83dc58_1440w.jpg)
+
+**复制、保存和清除网络信息**
+
+- 右键单击**`Requests Table`**（**`请求列表`**）以复制、保存或删除网络信息。一些选项是上下文相关的，所以如果想在单个资源上操作，需要右键单击该资源行。下面的列表描述了每个选项
+- **`Copy Response（复制响应）`**
+  将所选资源的HTTP响应复制到系统剪贴板。
+- **`Copy as cURL（复制为cURL）`** 将所选资源的网络请求作为cURL命令字符串复制到系统剪贴板。 请参阅将复制请求为cURL命令。
+  `curl命令是一个利用URL规则在命令行下工作的文件传输工具。它支持文件的上传和下载，所以是综合传输工具，但按传统，习惯称curl为下载工具。作为一款强力工具，curl支持包括HTTP、HTTPS、ftp等众多协议，还支持POST、cookies、认证、从指定偏移处下载部分文件、用户代理字符串、限速、文件大小、进度条等特征。做网页处理流程和数据检索自动化，curl可以祝一臂之力。l`
+- **`Copy All as HAR（全部复制为HAR）`**
+  将所有资源复制到系统剪贴板作为HAR数据。 HAR文件包含描述网络“瀑布”的JSON数据结构。一些第三方工具可以使用HAR文件中的数据重建网络瀑布。有关详细信息，请参阅Web性能强大工具：HTTP归档（HAR）。
+- **`Save as HAR with Content（另存为带内容的HAR）`**
+  将所有网络数据与每个页面资源一起保存到HAR文件中。 二进制资源（包括图像）被编码为Base64编码文本。
+- **`Clear Browser Cache（清除浏览器缓存）`**
+  清除浏览器高速缓存。提示：您也可以从Network Conditions(网络条件)抽屉式窗格中启用或禁用浏览器缓存。
+- **`Clear Browser Cookies（清除浏览器Cookie）`**
+  清除浏览器的Cookie。
+- **`Open in Sources Panel（在源文件面板中打开）`**
+  在Sources(源文件)面板中打开选定的资源。
+- **`Open Link in New Tab（在新标签页中打开链接）`**
+  在新标签页中打开所选资源。您还可以在Requests Table(请求列表)中双击资源名称。
+- **`Copy Link Address（复制链接地址）`**
+  将资源URL复制到系统剪贴板。
+- **`Save（保存）`**
+  保存所选的文本资源。仅显示在文本资源上。
+- **`Replay XHR（重新发送XHR）`**
+  重新发送所选的XMLHTTPRequest。仅显示在XHR资源上。
+
+**`查看资源发起者和依赖关系`**
+
+按住`Shift`并移动鼠标到资源上可查看它的发起者和依赖关系。这部分是你鼠标悬停的资源的target(目标)引用。 从target(目标)往上查找，第一个颜色编码为`绿色`的资源是target(目标)的发起者。如果存在第二个颜色编码为`绿色`资源，那么这个是发起者的发起者。从target(目标)向下查找，任何颜色编码为`红色`的资源都是target的依赖。
+
+
+
+![img](https://pic3.zhimg.com/80/v2-23779e7ca8ce0aae38f75c8b11ea3d6a_1440w.jpg)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+​			
