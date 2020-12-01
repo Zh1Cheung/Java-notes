@@ -626,6 +626,219 @@
 
 
 
+# **Channel**
+
+- Channel 的地位在编程语言中的地位之 高，比较罕见。
+
+- **Channel** **的发展**
+
+  - **CSP** 是 Communicating Sequential Process 的简称，**中文直译为通信顺序进程，或者叫做交换信息的循序进程，是用来描述并发系统中进行交互的一种模式。**
+  - **CSP 允许使用进程组件来描述系统，它们独立运行，并且只通过消息传递的方式通信。**
+  - **Channel 类型是 Go 语言内置的类型，你无需引入某个包，就能使用它**。
+  - Channel 和 Go 的另一个独特的特性 goroutine 一起为并发编程提供了优雅的、便利的、 与传统并发控制不同的方案，并演化出很多并发模式。
+
+- **Channel的应用场景**
+
+  - “**执行业务处理的 goroutine 不要通过共享内存的方式通信，而是要通过 Channel 通信的方式分享数据。**”
+    - **“communicate by sharing memory”是传统的并发编程处理方式**，就是指，共享的数据需要用锁进行保护，goroutine 需要获取到锁，才能并发访问 数据。
+    - **“share memory by communicating”则是类似于 CSP 模型的方式**，通过通信的方式， 一个 goroutine 可以把数据的“所有权”交给另外一个 goroutine(虽然 Go 中没有“所 有权”的概念，但是从逻辑上说，你可以把它理解为是所有权的转移)。
+  - Channel 的应用场景分为五种类型
+    - **数据交流**:当作并发的 buffer 或者 queue，解决生产者 - 消费者问题。多个 goroutine 可以并发当作生产者(Producer)和消费者(Consumer)。
+    - **数据传递**:一个 goroutine 将数据交给另一个 goroutine，相当于把数据的拥有权 (引用) 托付出去。
+    - **信号通知**:一个 goroutine 可以将信号 (closing、closed、data ready 等) 传递给另一 个或者另一组 goroutine 。
+    - **任务编排**:可以让一组 goroutine 按照一定的顺序并发或者串行的执行，这就是编排的 功能。
+    - **锁**:利用 Channel 也可以实现互斥锁的机制。
+
+- **Channel** **基本用法**
+
+  - 可以往 Channel 中发送数据，也可以从 Channel 中接收数据，所以，Channel 类型 (为了说起来方便，我们下面都把 Channel 叫做 chan)分为**只能接收**、**只能发送**、**既可 以接收又可以发送**三种类型。
+
+    - ```go
+      // 可以发送接收string 
+      1 chan string
+      // 只能发送struct{} 
+      2 chan<- struct{} 
+      // 只能从chan接收int
+      3 <-chan int
+      ```
+
+  - **chan 中的元素是任意的类型，所以也可能是 chan 类型**
+
+  - “<-”有个规则，总是尽量和左边的 chan 结合
+
+    - ```go
+      // <-和第一个chan结合
+      chan<- (chan int)
+      // 第一个<-和最左边的chan结合，第二个<-和左边第二个chan结合
+      chan<- (<-chan int) 
+      // 第一个<-和最左边的chan结合，第二个<-和左边第二个chan结合
+      <-chan (<-chan int) 
+      // 因为括号的原因，<-和括号内第一个chan结合
+      chan (<-chan int) 
+      ```
+
+  - 通过 make，我们可以初始化一个 chan，未初始化的 chan 的零值是 nil。你可以设置它的 容量，我们把这样的 chan 叫做 buffered chan;如果 没有设置，它的容量是 0，我们把这样的 chan 叫做 unbuffered chan。
+
+  - **nil 是 chan 的零值，是一种特殊的 chan，对值是 nil 的 chan 的发送接收调用者总是会阻塞。**
+
+  - Go 内建的函数 close、cap、len 都可以操作 chan 类型:close 会把 chan 关闭掉，cap 返回 chan 的容量，len 返回 chan 中缓存的还未被取走的元素数量。
+
+    - send 和 recv 都可以作为 select 语句的 case clause
+    - chan 还可以应用于 for-range 语句中
+
+- **Channel** **的实现原理**
+
+  - **chan数据结构**
+    - qcount:代表 chan 中已经接收但还没被取走的元素的个数。内建函数 len 可以返回这 个字段的值。
+    - dataqsiz:队列的大小。chan 使用一个循环队列来存放元素，循环队列很适合这种生产 者 - 消费者的场景(我很好奇为什么这个字段省略 size 中的 e)。
+    - buf:存放元素的循环队列的 buffer。
+    - elemtype 和 elemsize:chan 中元素的类型和 size。因为 chan 一旦声明，它的元素 类型是固定的，即普通类型或者指针类型，所以元素大小也是固定的。
+    - sendx:处理发送数据的指针在 buf 中的位置。一旦接收了新的数据，指针就会加上 elemsize，移向下一个位置。buf 的总大小是 elemsize 的整数倍，而且 buf 是一个循 环列表。
+    - recvx:处理接收请求时的指针在 buf 中的位置。一旦取出数据，此指针会移动到下一 个位置。
+    - recvq:chan 是多生产者多消费者的模式，如果消费者因为没有数据可读而被阻塞了， 就会被加入到 recvq 队列中。
+    - sendq:如果生产者因为 buf 满了而阻塞，会被加入到 sendq 队列中。
+  - **初始化**
+    - Go 在编译的时候，会根据容量的大小选择调用 makechan64，还是 makechan。
+    - **我们只关注 makechan 就好了，因为 makechan64 只是做了 size 检查，底层还是调用 makechan 实现的**。makechan 的目标就是生成 hchan 对象。
+    - makechan 的主要逻辑
+      -  它会根据 chan 的容量的大小和元素的类型不同，初始化不同的存储空间
+      - 最终，针对不同的容量和元素类型，这段代码分配了不同的对象来初始化 hchan 对象的字 段，返回 hchan 对象。
+  - **send**
+    - Go 在编译发送数据给 chan 的时候，会把 send 语句转换成 chansend1 函数， chansend1 函数会调用 chansend
+    - 最开始，第一部分是进行判断:如果 chan 是 nil 的话，就把调用者 goroutine park(阻 塞休眠)， 调用者就永远被阻塞住了
+    - 第二部分的逻辑是当你往一个已经满了的 chan 实例发送数据时，并且想不阻塞当前调 用，那么这里的逻辑是直接返回。chansend1 方法在调用 chansend 的时候设置了阻塞参 数，所以不会执行到第二部分的分支里。
+    - 第三部分显示的是，如果 chan 已经被 close 了，再往里面发送数据的话会 panic。
+    - 第四部分，如果等待队列中有等待的 receiver，那么这段代码就把它从队列中弹出，然后 直接把数据交给它(通过 memmove(dst, src, t.size))，而不需要放入到 buf 中，速度可 以更快一些。
+    - 第五部分说明当前没有 receiver，需要把数据放入到 buf 中，放入之后，就成功返回了。
+    - 第六部分是处理 buf 满的情况。如果 buf 满了，发送者的 goroutine 就会加入到发送者的 等待队列中，直到被唤醒。这个时候，数据或者被取走了，或者 chan 被 close 了。
+  - **recv**
+    - 处理从 chan 中接收数据时，Go 会把代码转换成 chanrecv1 函数，如果要返回两个返 回值，会转换成 chanrecv2，chanrecv1 函数和 chanrecv2 会调用 chanrecv。
+    - 第一部分是 chan 为 nil 的情况。和 send 一样，从 nil chan 中接收(读取、获取)数据 时，调用者会被永远阻塞。
+    - 第二部分是 chan 已经被 close 的情况。如果 chan 已经被 close 了，并且队列中没有缓存 的元素，那么返回 true、false。
+    - 第三部分是处理 sendq 队列中有等待者的情况。这个时候，如果 buf 中有数据，优先从 buf 中读取数据，否则直接从等待队列中弹出一个 sender，把它的数据复制给这个 receiver。
+    - 第四部分是处理没有等待的 sender 的情况。这个是和 chansend 共用一把大锁，所以不 会有并发的问题。如果 buf 有元素，就取出一个元素给 receiver。
+    - 第五部分是处理 buf 中没有元素的情况。如果没有元素，那么当前的 receiver 就会被阻 塞，直到它从 sender 中接收了数据，或者是 chan 被 close，才返回。
+  - **close**
+    - 通过 close 函数，可以把 chan 关闭，编译器会替换成 closechan 方法的调用。
+    - 如果 chan 为 nil，close 会 panic;如果 chan 已 经 closed，再次 close 也会 panic。否则的话，如果 chan 不为 nil，chan 也没有 closed，就把等待队列中的 sender(writer)和 receiver(reader)从队列中全部移除并 唤醒。
+
+
+
+
+
+
+
+#  **内存模型**
+
+- **它描述的是并发环境中多goroutine 读相同变量的时候，变量的可见性条件。**具体点说，就是指，在什么条件下，goroutine 在读取一个变量的值的时候，能够看到其它 goroutine 对这个变量进行的写的结果。
+
+  - 由于 CPU 指令重排和多级 Cache 的存在，保证多核访问同一个变量这件事儿变得非常复 杂。
+  - 除了 Go，Java、C++、C、C#、Rust 等编程语言也有内存模型。为什么这些编程语言都 要定义内存模型呢?在我看来，主要是两个目的。
+    - 向广大的程序员提供一种保证，以便他们在做设计和开发程序时，面对同一个数据同时 被多个 goroutine 访问的情况，可以做一些串行化访问的控制，比如使用 Channel 或 者 sync 包和 sync/atomic 包中的并发原语。
+    - 允许编译器和硬件对程序做一些优化。这一点其实主要是为编译器开发者提供的保证， 这样可以方便他们对 Go 的编译器做优化。
+
+- **重排和可见性的问题**
+
+  - **由于指令重排，代码并不一定会按照你写的顺序执行**
+    - 举个例子，当两个 goroutine 同时对一个数据进行读写时，假设 goroutine g1 对这个变 量进行写操作 w，goroutine g2 同时对这个变量进行读操作 r，那么，如果 g2 在执行读 操作 r 的时候，已经看到了 g1 写操作 w 的结果，那么，也不意味着 g2 能看到在 w 之前的其它的写操作。这是一个反直观的结果，不过的确可能会存在。
+  - **重排以及多核 CPU 并发执行导致程序的运行和代码的书写顺序不一样的情况。**
+
+- **happens-before**
+
+  - Go 内存模型中很重要的一个概念:happens-before，这是**用来描述两个时间的顺序关系的**。**如果某些操作能提供 happens-before 关系，那么，我们就可 以 100% 保证它们之间的顺序。**
+  - **在一个 goroutine 内部，程序的执行顺序和它们的代码指定的顺序是一样的，即使编译器或者 CPU 重排了读写顺序，从行为上来看，也和代码指定的顺序一样。**
+    - 但是，对于另一个 goroutine 来说，重排却会产生非常大的影响。**因为 Go 只保证 goroutine 内部重排对读写的顺序没有影响**
+    - Go 内存模型通过 happens-before 定义两个事件(读、写 action)的顺序:如果事件 e1 happens before 事件 e2，那么，我们就可以说事件 e2 在事件 e1 之后发生(happens after)。如果 e1 不是 happens before e2， 同时也不 happens after e2，那么，我们 就可以说事件 e1 和 e2 是同时发生的。
+    - **在 goroutine 内部对一个局部变量 v 的读，一定能观察到最近一次对这个局部变量 v 的 写。如果要保证多个 goroutine 之间对一个共享变量的读写顺序，在 Go 语言中，可以使 用并发原语为读写操作建立 happens-before 关系，这样就可以保证顺序了。**
+
+- 三个 Go 语言中和内存模型有关的小知识
+
+  - 在 Go 语言中，**对变量进行零值的初始化就是一个写操作。**
+  - 如果对**超过机器 word**(64bit、32bit 或者其它)大小的值进行读写，那么，就可以看 作是**对拆成 word 大小的几个读写无序进行。**
+  - Go 并不提供直接的 CPU 屏障(CPU fence)来提示编译器或者 CPU 保证顺序性，而是**使用不同架构的内存屏障指令来实现统一的并发原语。**
+
+- **Go** **语言中保证的** **happens-before** **关系**
+
+  - **init函数**
+    - 应用程序的初始化是在单一的 goroutine 执行的。如果包 p 导入了包 q，那么，q 的 init函数的执行一定 happens before p 的任何初始化代码。
+    - 这里有一个特殊情况需要你记住:**main 函数一定在导入的包的 init 函数之后执行**。
+    - 这个例子是一个 **main** 程序，它依赖包 p1，包 p1 依赖包 p2，包 p2 依赖 p3。
+      - P3变量初始化-P3的init函数-P2变量初始化-P2的init函数-P1变量初始化-P1的init函数-main的init函数-main函数
+
+- **goroutine**
+
+  - 首先，我们需要明确一个规则:**启动 goroutine 的 go 语句的执行，一定 happens before 此 goroutine 内的代码执行。**
+    - 根据这个规则，我们就可以知道，如果 go 语句传入的参数是一个函数执行的结果，那 么，这个函数一定先于 goroutine 内部的代码被执行。
+    - 刚刚说的是启动 goroutine 的情况，**goroutine 退出的时候，是没有任何 happens- before 保证的。**所以，如果你想观察某个 goroutine 的执行效果，你需要使用同步机制建 立 happens-before 关系，比如 Mutex 或者 Channel
+
+- **Channel**
+
+  - 通用的 Channel happens-before 关系保证有 4 条规则
+
+    - **第 1 条规则是**，往 Channel 中的发送操作，happens before 从该 Channel 接收相应数 据的动作完成之前
+
+    - **第 2 条规则是**，close 一个 Channel 的调用，肯定 happens before 从关闭的 Channel 中读取出一个零值。
+
+    - **第 3 条规则是**，对于 unbuffered 的 Channel，也就是容量是 0 的 Channel，从此 Channel 中读取数据的调用一定 happens before 往此 Channel 发送数据的调用完成。
+
+      - ```go
+        var ch = make(chan int)
+        var s string
+        func f(){
+        	s = "hello"
+        	<-ch
+        }
+        func main(){
+        	go f()
+        	ch <- struct{}{}
+        	print(s)
+        }
+        ```
+
+      - 如果第 11 行发送语句执行成功(完毕)，那么根据这个规则，第 6 行(接收)的调用肯 定发生了(执行完成不完成不重要，重要的是这一句“肯定执行了”)，那么 s 也肯定初 始化了，所以一定会打印出“hello world”。
+
+    - **第 4 条规则是**，如果 Channel 的容量是 m(m>0)，那么，第 n 个 receive 一定 happens before 第 n+m 个 send 的完成。
+
+- **Mutex/RWMutex**
+
+  - 第 n 次的 m.Unlock 一定 happens before 第 n+1 m.Lock 方法的返回;
+  - 对于读写锁 l 的 l.RLock 方法调用，如果存在一个 **n**，这次的 l.RLock 调用 happens after 第 n 次的 l.Unlock，那么，和这个 RLock 相对应的 l.RUnlock 一定 happens before 第 n+1 次 l.Lock。意思是，**读写锁的 Lock 必须等待既有的读锁释放后才能获 取到。**
+
+- **WaitGroup**
+
+  - 对于一个 WaitGroup 实例 wg，在某个时刻 t0 时，它的计数值已经不是零了，假如 t0 时 刻之后调用了一系列的 wg.Add(n) 或者 wg.Done()，并且只有最后一次调用 wg 的计数值 变为了 0，那么，可以保证这些 wg.Add 或者 wg.Done() 一定 happens before t0 时刻 之后调用的 wg.Wait 方法的返回。
+  - 这个保证的通俗说法，就是 **Wait 方法等到计数值归零之后才返回**。
+
+- **Once**
+
+  - 它提供的保证是:**对于 once.Do(f) 调用，f 函数的那个单次调用一定 happens before 任何 once.Do(f) 调用的 返回**。换句话说，就是函数 f 一定会在 Do 方法返回之前执行。
+
+- **atomic**
+
+  - 对于 Go 1.15 的官方实现来说，可以保证使用 atomic 的 Load/Store 的变量之间的顺序 性。
+
+  - 在下面的例子中，打印出的 a 的结果总是 1，但是官方并没有做任何文档上的说明和保 证。
+
+    - ```go
+      func main(){
+      	var a,b int32 = 0,0
+      	
+      	go func(){
+      		atomic.StoreInt32(&a,1)
+      		atomic.StoreInt32(&b,1)
+      	}()
+      	
+      	for atomic.LoadInt32(&b) == 0{
+      		runtime.Gosched()
+      	}
+      	fmt.Println(atomic.LoadInt32(&a))
+      	
+      }
+      ```
+
+  
+
+
 
 
 # 总结
