@@ -267,7 +267,115 @@
       }
       ```
 
-- 
+
+
+
+
+
+
+
+
+
+# saml
+
+- 当Stu单击Salesforce图标时，其公司的身份提供者生成了SAML断言（声明其身份的消息），他的浏览器导航到Salesforce，最后Salesforce验证了SAML断言并授予他访问权限。
+
+- IdP配置
+
+  - SP提供了SAML断言的规范（应包含什么以及应如何格式化），并在IdP上进行设置。
+  - 必须在每个SP的IdP处设置以下值，并且通常有很多值。
+    - **EntityID** -SP的全局唯一名称。格式各不相同，但越来越常见的是将此值格式化为URL。
+    - **断言消费者服务（ACS）** -发送SAML断言的URL位置。
+    - **ACS验证程序**-一种安全措施，采用正则表达式（regex）形式，可确保将SAML声明发送到正确的ACS。这仅在SP发起的登录（其中SAML请求包含ACS位置）期间起作用，因此此ACS验证程序将确保SAML请求提供的ACS位置是合法的。
+    - **属性**-**属性**的数量和格式可以有很大的不同。通常至少有一个属性，nameID，通常是尝试登录的用户的用户名。
+    - **RelayState-**不需要。SAML的深层链接。这告诉SP成功登录用户后将用户带到何处。
+    - **SAML签名算法**-SHA-1或SHA-256。不太常见的SHA-384或SHA-512。该算法与下面提到的X.509证书结合使用。
+
+- SP配置
+
+  - 与上述部分相反，本部分涉及由IdP提供并在SP处设置的信息。
+  - **X.509证书**-IdP提供的证书，**用于验证IdP在SAML声明的元数据中传递的公钥**。它允许SP验证SAML断言*实际上*来自其信任的IdP。通常对SAML断言进行签名，但是也可以对SAML请求进行签名。通常，它是从IdP下载或复制的，并通过将其粘贴到SP中进行配置。
+  - **发行者URL** -IdP的唯一标识符。格式化为包含有关IdP信息的URL，以便SP可以验证其接收到的SAML断言是从正确的IdP发出的。
+  - **SAML SSO端点/服务提供商登录URL-**一个IdP端点，当SP使用SAML请求将其重定向到此处时，该端点将启动身份验证。
+  - **SAML SLO（单一注销）端点**-一个IdP端点，当由SP重定向到此位置时，通常会在用户单击“注销”后关闭该用户的IdP会话。
+
+- SAML与Oauth和Web服务联合有何不同？
+
+  - 企业最常使用的**SAML**，允许其用户访问其付费服务。SAML向服务提供者断言用户是谁；这是身份验证。
+  - 消费者应用和服务最常用的**OAuth**，因此用户无需注册新的用户名和密码。“使用Google登录”和“使用Facebook登录”是现实世界中OAuth的示例。OAuth委托第三方访问一个人的Google或Facebook帐户。
+
+- 流程
+
+  - 方案 1：SP 启动的请求式 Web SSO（最终用户在 SP 上启动）
+
+  ![SP 启动的请求式 Web SSO（最终用户在 SP 上启动）](https://www.ibm.com/support/knowledgecenter/zh/SSEQTP_liberty/com.ibm.websphere.wlp.doc/images/saml_sp_sso.gif)
+
+  1. 最终用户访问 SP。
+  2. SP 将用户重定向至 IdP。
+  3. 最终用户向 IdP 认证。
+  4. IdP 将 SAML 响应和断言发送至 SP。
+  5. SP 验证 SAML 响应并对用户请求授权。
+
+  - 方案 2：IdP 启动的非请求式 Web SSO（最终用户在 IdP 上启动）
+
+  ![IdP 启动的非请求式 Web SSO（最终用户在 IdP 上启动）](https://www.ibm.com/support/knowledgecenter/zh/SSEQTP_liberty/com.ibm.websphere.wlp.doc/images/saml_idp_sso.gif)
+
+  1. 用户代理访问 SAML IdP。
+  2. IdP 认证用户并发出 SAML 断言。
+  3. IdP 将用户重定向至 SP 并产生 SAMLResponse。
+  4. SP 验证 SAML 响应并对用户请求授权。
+
+  - 方案 3：OpenID Connect 提供者和 SAML 服务提供者
+
+  ![OpenID Connect 提供者和 SAML 服务提供者](https://www.ibm.com/support/knowledgecenter/zh/SSEQTP_liberty/com.ibm.websphere.wlp.doc/images/saml_oidc.gif)
+
+  1. 最终用户访问 OpenID Connect 依赖方 (RP)。
+  2. RP 将最终用户重定向至 OpenID Connect 提供者 (OP)。
+  3. OP（又称为 SAML SP）将最终用户重定向至 SAML IdP。
+  4. 最终用户向 SAML IdP 认证。
+  5. IdP 将最终用户重定向至 SP 并产生 SAMLResponse。
+  6. OP/SP 验证 SAML，并将授权代码发送至 RP。
+  7. RP 针对 `id_token` 和 `access_token` 交换代码。
+  8. RP 验证 `id_token` 并向最终用户授权。
+
+- saml流程
+
+  - ![img](https://pic4.zhimg.com/80/v2-1f366cde28c28a9c0d868fbbfb45d907_1440w.jpg)
+
+- openid流程
+  - ![img](https://pic4.zhimg.com/80/v2-1f366cde28c28a9c0d868fbbfb45d907_1440w.jpg)
+  - 因为提供OpenID的IDP服务并不确定在哪，所以在打开IDP的登陆页面之前，用户需要在SP提供的一个符合OpenID标准的表单上，输入下自己账号所在的IDP地址信息，以便让SP找到相应的IDP服务。
+  - 而且值得注意的是，OpenID只提供了认证，而并没有授权。也就是说OpenID的IDP只确认了确实有这个账号，而这个账号能不能访问该网站的内容，OpenID的IDP并不关心。
+- oauth2流程
+  - ![img](https://pic3.zhimg.com/80/v2-ab87935bbc902eff098de0f0aea640a2_1440w.jpg)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
