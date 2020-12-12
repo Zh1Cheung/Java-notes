@@ -306,7 +306,7 @@
 
 - 流程
 
-  - 方案 1：SP 启动的请求式 Web SSO（最终用户在 SP 上启动）
+  - **方案 1：SP 启动的请求式 Web SSO（最终用户在 SP 上启动）**
 
   ![SP 启动的请求式 Web SSO（最终用户在 SP 上启动）](https://www.ibm.com/support/knowledgecenter/zh/SSEQTP_liberty/com.ibm.websphere.wlp.doc/images/saml_sp_sso.gif)
 
@@ -316,7 +316,7 @@
   4. IdP 将 SAML 响应和断言发送至 SP。
   5. SP 验证 SAML 响应并对用户请求授权。
 
-  - 方案 2：IdP 启动的非请求式 Web SSO（最终用户在 IdP 上启动）
+  - **方案 2：IdP 启动的非请求式 Web SSO（最终用户在 IdP 上启动）**
 
   ![IdP 启动的非请求式 Web SSO（最终用户在 IdP 上启动）](https://www.ibm.com/support/knowledgecenter/zh/SSEQTP_liberty/com.ibm.websphere.wlp.doc/images/saml_idp_sso.gif)
 
@@ -325,7 +325,7 @@
   3. IdP 将用户重定向至 SP 并产生 SAMLResponse。
   4. SP 验证 SAML 响应并对用户请求授权。
 
-  - 方案 3：OpenID Connect 提供者和 SAML 服务提供者
+  - **方案 3：OpenID Connect 提供者和 SAML 服务提供者**
 
   ![OpenID Connect 提供者和 SAML 服务提供者](https://www.ibm.com/support/knowledgecenter/zh/SSEQTP_liberty/com.ibm.websphere.wlp.doc/images/saml_oidc.gif)
 
@@ -343,15 +343,86 @@
   - ![img](https://pic4.zhimg.com/80/v2-1f366cde28c28a9c0d868fbbfb45d907_1440w.jpg)
 
 - openid流程
-  - ![img](https://pic4.zhimg.com/80/v2-1f366cde28c28a9c0d868fbbfb45d907_1440w.jpg)
+  - ![img](https://pic1.zhimg.com/80/v2-99c0a91c71bc8e14df1f6afc151510d0_1440w.jpg)
   - 因为提供OpenID的IDP服务并不确定在哪，所以在打开IDP的登陆页面之前，用户需要在SP提供的一个符合OpenID标准的表单上，输入下自己账号所在的IDP地址信息，以便让SP找到相应的IDP服务。
   - 而且值得注意的是，OpenID只提供了认证，而并没有授权。也就是说OpenID的IDP只确认了确实有这个账号，而这个账号能不能访问该网站的内容，OpenID的IDP并不关心。
+  
 - oauth2流程
+  
   - ![img](https://pic3.zhimg.com/80/v2-ab87935bbc902eff098de0f0aea640a2_1440w.jpg)
+  
+- `<saml:Assertion>`元素包含以下子元素：
 
+  - ```xml
+    <saml:Assertion
+       xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+       xmlns:xs="http://www.w3.org/2001/XMLSchema"
+       ID="_d71a3a8e9fcc45c9e9d248ef7049393fc8f04e5f75"
+       Version="2.0"
+       IssueInstant="2004-12-05T09:22:05Z">
+       <saml:Issuer>https://idp.example.org/SAML2</saml:Issuer>
+       <ds:Signature
+         xmlns:ds="http://www.w3.org/2000/09/xmldsig#">...</ds:Signature>
+       <saml:Subject>
+         <saml:NameID
+           Format="urn:oasis:names:tc:SAML:2.0:nameid-format:transient">
+           3f7b3dcf-1674-4ecd-92c8-1544f346baf8
+         </saml:NameID>
+         <saml:SubjectConfirmation
+           Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
+           <saml:SubjectConfirmationData
+             InResponseTo="aaf23196-1773-2113-474a-fe114412ab72"
+             Recipient="https://sp.example.com/SAML2/SSO/POST"
+             NotOnOrAfter="2004-12-05T09:27:05Z"/>
+         </saml:SubjectConfirmation>
+       </saml:Subject>
+       <saml:Conditions
+         NotBefore="2004-12-05T09:17:05Z"
+         NotOnOrAfter="2004-12-05T09:27:05Z">
+         <saml:AudienceRestriction>
+           <saml:Audience>https://sp.example.com/SAML2</saml:Audience>
+         </saml:AudienceRestriction>
+       </saml:Conditions>
+       <saml:AuthnStatement
+         AuthnInstant="2004-12-05T09:22:00Z"
+         SessionIndex="b07b804c-7c29-ea16-7300-4f3d6f7928ac">
+         <saml:AuthnContext>
+           <saml:AuthnContextClassRef>
+             urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport
+           </saml:AuthnContextClassRef>
+         </saml:AuthnContext>
+       </saml:AuthnStatement>
+       <saml:AttributeStatement>
+         <saml:Attribute
+           xmlns:x500="urn:oasis:names:tc:SAML:2.0:profiles:attribute:X500"
+           x500:Encoding="LDAP"
+           NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:uri"
+           Name="urn:oid:1.3.6.1.4.1.5923.1.1.1.1"
+           FriendlyName="eduPersonAffiliation">
+           <saml:AttributeValue
+             xsi:type="xs:string">member</saml:AttributeValue>
+           <saml:AttributeValue
+             xsi:type="xs:string">staff</saml:AttributeValue>
+         </saml:Attribute>
+       </saml:AttributeStatement>
+     </saml:Assertion>
+    ```
 
+  - 一个`<saml:Issuer>`元件，它包含身份提供者的唯一标识符
 
+  - 一个`<ds:Signature>`元件，其中包含一个完整性保留的数字签名（未示出）在所述`<saml:Assertion>`元件
 
+  - `<saml:Subject>`标识已验证主体的元素（但是在这种情况下，出于隐私原因，主体的身份隐藏在不透明的临时标识符后面）
+
+  - 一个`<saml:Conditions>`元素，该元素给出断言被视为*有效的条件*
+
+  - 一个`<saml:AuthnStatement>`元素，它描述身份提供者处的身份验证行为
+
+  - 一个`<saml:AttributeStatement>`元素，该元素断言与已验证主体相关联的多值属性
+
+- 换句话说，该断言编码以下信息：
+
+  > 断言（“ b07b804c-7c29-ea16-7300-4f3d6f7928ac”）由身份提供者（https://idp.example.org/SAML2）在时间“ 2004-12-05T09：22：05Z”发布，涉及主题（3f7b3dcf -1674-4ecd-92c8-1544f346baf8）专门用于服务提供商（https://sp.example.com/SAML2）。
 
 
 
