@@ -206,6 +206,14 @@
       - 服务提供商
         - 这是用户希望使用的云托管应用程序或服务。
     - 典型的流程如下：当事人向服务提供商发出请求。服务提供商接着向身份提供者请求身份验证。身份提供者将 **SAML**断言发送给服务提供商，然后服务提供商可以将响应发送给当事人。
+    - 1. 用户想要访问[http://www.abc.com](https://link.zhihu.com/?target=http%3A//www.abc.com)的资源 
+      2. SP发送了一个重定向消息给浏览器。重定向消息的HTTP报文头中包含了Idp登录服务的URI地址，同时还有一个被称为SAMLRequest的认证请求变量。浏览器处理该重定向请求：发起一个GET请求到Idp登录地址并将SAMLRequest作为请求参数。
+      3. Idp的单点登录服务要求用户提供身份凭证。
+      4. 用户输入自己的身份凭证。 
+      5. Idp的单点登录服务发送一个HTML表单给浏览器。HTML表单中包含了SAML响应，该响应中是一个SAML断言。SAML规范要求SAML断言必须被数字签名。
+      6. 浏览器收到SAML响应之后，会发起一个请求到SP的AssertionConsumerService，请求中包含了接收到的SAML响应。 
+      7. SP的Assertion Consumer验证SAML响应中数字签名的合法性。如果验证通过，他会发起一个到目标资源的重定向请求，请求的cookie中包含了当前用户的session信息。
+      8. 浏览器的请求抵达SP，SP的AccessCheck模块检查当前请求的cookie信息并返回目标资源。
 
   - 什么是 SAML 断言？
 
@@ -276,7 +284,7 @@
 
 
 
-# saml
+# SAML
 
 - 当Stu单击Salesforce图标时，其公司的身份提供者生成了SAML断言（声明其身份的消息），他的浏览器导航到Salesforce，最后Salesforce验证了SAML断言并授予他访问权限。
 
@@ -294,7 +302,7 @@
 - SP配置
 
   - 与上述部分相反，本部分涉及由IdP提供并在SP处设置的信息。
-  - **X.509证书**-IdP提供的证书，**用于验证IdP在SAML声明的元数据中传递的公钥**。它允许SP验证SAML断言*实际上*来自其信任的IdP。通常对SAML断言进行签名，但是也可以对SAML请求进行签名。通常，它是从IdP下载或复制的，并通过将其粘贴到SP中进行配置。
+  - **X.509证书**-IdP提供的证书，**用于验证IdP在SAML声明的元数据中传递的公钥**。**它允许SP验证SAML断言*实际上*来自其信任的IdP。通常对SAML断言进行签名，但是也可以对SAML请求进行签名。通常，它是从IdP下载或复制的，并通过将其粘贴到SP中进行配置。**
   - **发行者URL** -IdP的唯一标识符。格式化为包含有关IdP信息的URL，以便SP可以验证其接收到的SAML断言是从正确的IdP发出的。
   - **SAML SSO端点/服务提供商登录URL-**一个IdP端点，当SP使用SAML请求将其重定向到此处时，该端点将启动身份验证。
   - **SAML SLO（单一注销）端点**-一个IdP端点，当由SP重定向到此位置时，通常会在用户单击“注销”后关闭该用户的IdP会话。
@@ -345,7 +353,7 @@
 - openid流程
   - ![img](https://pic1.zhimg.com/80/v2-99c0a91c71bc8e14df1f6afc151510d0_1440w.jpg)
   - 因为提供OpenID的IDP服务并不确定在哪，所以在打开IDP的登陆页面之前，用户需要在SP提供的一个符合OpenID标准的表单上，输入下自己账号所在的IDP地址信息，以便让SP找到相应的IDP服务。
-  - 而且值得注意的是，OpenID只提供了认证，而并没有授权。也就是说OpenID的IDP只确认了确实有这个账号，而这个账号能不能访问该网站的内容，OpenID的IDP并不关心。
+  - 而且值得注意的是，**OpenID只提供了认证，而并没有授权。也就是说OpenID的IDP只确认了确实有这个账号，而这个账号能不能访问该网站的内容，OpenID的IDP并不关心。**
   
 - oauth2流程
   
@@ -426,7 +434,328 @@
 
 
 
+## SAML Metadata
 
+- 为了安全地进行互操作，合作伙伴以任何形式和可能的方式共享元数据。无论如何，至少必须共享以下元数据：
+  - 实体编号
+  - 加密密钥
+  - 协议端点（绑定和位置）
+- 每个SAML系统实体都有一个entity ID，一个用于软件配置的全局唯一标识符，依赖方数据库和客户端Cookie。在线上，每条SAML协议消息都包含发行者的entity ID。
+  - 出于身份验证的目的，SAML消息可由发布者进行数字签名。为了验证消息上的签名，消息接收者使用已知属于发行者的公共密钥。类似地，为了加密消息，发行者必须知道属于最终接收者的公共加密密钥。**在签名和加密这两种情况下，必须事先共享受信任的公用密钥。**
+
+
+
+## SAMLResponse
+
+- ```xml
+  <?xml version="1.0" encoding="utf-8"?>
+  <saml2p:Response
+      xmlns:saml2p="urn:oasis:names:tc:SAML:2.0:protocol" Destination="https://signin.aliyun.com/saml/SSO" ID="_256e1b401c2ac9d2b3ac259d813cd8f9" InResponseTo="a5a808ahjaii493f4436359j4d478f2" IssueInstant="2019-10-05T02:55:49.397Z" Version="2.0">
+      <saml2:Issuer
+          xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion">https://accounts.google.com/o/saml2?idpid=C01k0l1si
+      </saml2:Issuer>
+      <saml2p:Status>
+          <saml2p:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+      </saml2p:Status>
+      <saml2:Assertion
+          xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion" ID="_a06a19baf0b991c23b41e4c57b808d34" IssueInstant="2019-10-05T02:55:49.397Z" Version="2.0">
+          <saml2:Issuer>https://accounts.google.com/o/saml2?idpid=C01k0l1si</saml2:Issuer>
+          <ds:Signature
+              xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+              <ds:SignedInfo>
+                  <ds:CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+                  <ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>
+                  <ds:Reference URI="#_a06a19baf0b991c23b41e4c57b808d34">
+                      <ds:Transforms>
+                          <ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
+                          <ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+                      </ds:Transforms>
+                      <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+                      <ds:DigestValue>n6vzikmbE+G8rjj9K7GqNFydq3KXaP6ttZbjU1HUcrA=</ds:DigestValue>
+                  </ds:Reference>
+              </ds:SignedInfo>
+              <ds:SignatureValue>R0z281cp...W8hyg==</ds:SignatureValue>
+              <ds:KeyInfo>
+                  <ds:X509Data>
+                      <ds:X509SubjectName>ST=California,C=US,OU=Google For Work,CN=Google,L=Mountain View,O=Google Inc.</ds:X509SubjectName>
+                      <ds:X509Certificate>MIIDdDCCAlygAw...4VL4OJkRnq72oPN+Z</ds:X509Certificate>
+                  </ds:X509Data>
+              </ds:KeyInfo>
+          </ds:Signature>
+          <saml2:Subject>
+              <saml2:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified">admin@testForBlog.onaliyun.com</saml2:NameID>
+              <saml2:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
+                  <saml2:SubjectConfirmationData InResponseTo="a5a808ahjaii493f4436359j4d478f2" NotOnOrAfter="2019-10-05T03:00:49.397Z" Recipient="https://signin.aliyun.com/saml/SSO"/>
+              </saml2:SubjectConfirmation>
+          </saml2:Subject>
+          <saml2:Conditions NotBefore="2019-10-05T02:50:49.397Z" NotOnOrAfter="2019-10-05T03:00:49.397Z">
+              <saml2:AudienceRestriction>
+                  <saml2:Audience>https://signin.aliyun.com/1797870240813407/saml/SSO</saml2:Audience>
+              </saml2:AudienceRestriction>
+          </saml2:Conditions>
+          <saml2:AuthnStatement AuthnInstant="2019-10-05T02:29:07.000Z" SessionIndex="_a06a19baf0b991c23b41e4c57b808d34">
+              <saml2:AuthnContext>
+                  <saml2:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:unspecified</saml2:AuthnContextClassRef>
+              </saml2:AuthnContext>
+          </saml2:AuthnStatement>
+      </saml2:Assertion>
+  </saml2p:Response>
+  ```
+
+- SAMLResponse的内容按照SAML规范解码如下：
+
+  > Destination：代表当前SAMLResponse要发送到的地址
+  > ID：代表当前SAMLResponse的唯一标识。
+  > InResponseTo：代表当前SAMLResponse用于回应拿给SAMLRequest，对应的是SAMLRequest的ID。
+  > IssueInstant：代表当前断言的发布时间
+  > Issuer：代表当前断言的发布者，实际上就是IDP的entityID
+  > Status：代表认证状态，Success代表认证通过
+
+- **由于SP中声明了WantAssertionsSigned=true，说明SP需要接收被签名的SAMLResponse。**因此SAMLResponse中有签名相关的内容，使用ds:Signature表示。
+
+  > CanonicalizationMethod：表示签名过程中使用的规范化方法
+  > SignatureMethod：代表使用的签名方法。这里为RSA-SHA256
+  > DigestMethod：代表签名过程中使用的摘要方法
+  > DigestValue：代表使用摘要方法获得的值
+  > SignatureValue：代表最终获得的签名内容
+  > X509Data：代表签名时使用的私钥对应的公钥证书信息，该值和IDP中的证书信息是保持一致的
+
+- 签名部分保证了SAMLResponse消息的机密性以及消息来源的合法性，Subject则用来声明被认证者的身份信息。
+
+  > NameID：代表用户的身份，可以是邮箱、姓名等
+  > SubjectConfirmation：代表当前身份的生效条件。用InResponseTo表明该身份是用于响应哪个SAMLRequest的，NotOnOrAfter代表生效的时间限制。
+  > Recipient：通常是当前SAMLResponse的消费地址，对应SP元文件中的断言消费地址AssertionConsumerService。
+
+- Conditions部分用来描述当前SAMLResponse生效的限制条件。
+
+  > NotBefore：代表生效时间的起点
+  > NotOnOrAfter：代表生效时间的终点
+  > Audience：代表当前SAMLResponse的受众，通常来说，Audience等于目标SP的entityID
+
+- AuthnStatement用于描述认证发生时的情况
+
+  > AuthnInstant：代表认证发生的时间
+  > AuthnContext：代表认证时的上下文环境，比如当前认证是使用Password认证或者联合认证等等。在某些场景下，SP可能会限制IDP使用的认证手段，此时该字段就会派上用场。
+
+- **SAML Response (IdP -> SP)**
+
+  - 本示例包含多个SAML响应。身份提供商将SAML响应发送到服务提供商，并且如果用户在身份验证过程中成功，则该SAML响应包含具有NameID /用户属性的声明。
+
+  - 有8个示例
+
+    > 具有未签名断言的未签名SAML响应
+    > 具有签名断言的未签名SAML响应
+    > 具有未签名断言的已签名SAML响应
+    > 已签名的SAML响应和已声明的断言
+    > 带有加密断言的未签名SAML响应
+    > 带有加密的签名断言的未签名的SAML响应
+    > 带加密断言的签名SAML响应
+    > 带有加密的签名断言的签名的SAML响应
+
+
+
+
+
+## SAML Example
+
+- 每个服务提供商必须建立一个自签名的X.509密钥对。您可以使用以下内容生成自己的内容：
+
+  - ```
+    openssl req -x509 -newkey rsa:2048 -keyout myservice.key -out myservice.cert -days 365 -nodes -subj "/CN=myservice.example.com"
+    ```
+
+- 测试程序
+
+  - ```go
+    package main
+    
+    import (
+    	"crypto/rsa"
+    	"crypto/tls"
+    	"crypto/x509"
+    	"fmt"
+    	"net/http"
+    	"net/url"
+    
+    	"github.com/crewjam/saml/samlsp"
+    )
+    
+    func hello(w http.ResponseWriter, r *http.Request) {
+    	fmt.Fprintf(w, "Hello, %s!", samlsp.AttributeFromContext(r.Context(), "cn"))
+    }
+    
+    func main() {
+    	keyPair, err := tls.LoadX509KeyPair("myservice.cert", "myservice.key")
+    	if err != nil {
+    		panic(err) // TODO handle error
+    	}
+    	keyPair.Leaf, err = x509.ParseCertificate(keyPair.Certificate[0])
+    	if err != nil {
+    		panic(err) // TODO handle error
+    	}
+    
+    	idpMetadataURL, err := url.Parse("https://samltest.id/saml/idp")
+    	if err != nil {
+    		panic(err) // TODO handle error
+    	}
+    
+    	rootURL, err := url.Parse("http://localhost:8000")
+    	if err != nil {
+    		panic(err) // TODO handle error
+    	}
+    
+    	samlSP, _ := samlsp.New(samlsp.Options{
+    		URL:            *rootURL,
+    		Key:            keyPair.PrivateKey.(*rsa.PrivateKey),
+    		Certificate:    keyPair.Leaf,
+    		IDPMetadataURL: idpMetadataURL,
+    	})
+    	app := http.HandlerFunc(hello)
+    	http.Handle("/hello", samlSP.RequireAccount(app))
+    	http.Handle("/saml/", samlSP)
+    	http.ListenAndServe(":8000", nil)
+    }
+    
+    ```
+
+- 身份提供者中注册我们的服务提供者，以建立从服务提供者到IDP的信任。
+
+  - 导航到https://samltest.id/upload.php并上传您获取的文件。
+
+- [crewjam](https://github.com/crewjam)/**[saml](https://github.com/crewjam/saml)**
+
+  - 该程序包可以生成签名的SAML断言，并且可以验证签名和加密的SAML断言。它不支持签名或加密的请求。
+
+
+
+
+
+# OIDC Example
+
+- ```go
+  provider, err := oidc.NewProvider(ctx, "https://accounts.google.com")
+  if err != nil {
+      // handle error
+  }
+  
+  // Configure an OpenID Connect aware OAuth2 client.
+  oauth2Config := oauth2.Config{
+      ClientID:     clientID,
+      ClientSecret: clientSecret,
+      RedirectURL:  redirectURL,
+  
+      // Discovery returns the OAuth2 endpoints.
+      Endpoint: provider.Endpoint(),
+  
+      // "openid" is a required scope for OpenID Connect flows.
+      Scopes: []string{oidc.ScopeOpenID, "profile", "email"},
+  }
+  
+  ```
+
+- 在响应上，提供程序可用于验证ID令牌。
+
+  - ```go
+    var verifier = provider.Verifier(&oidc.Config{ClientID: clientID})
+    
+    func handleOAuth2Callback(w http.ResponseWriter, r *http.Request) {
+        // Verify state and errors.
+    
+        oauth2Token, err := oauth2Config.Exchange(ctx, r.URL.Query().Get("code"))
+        if err != nil {
+            // handle error
+        }
+    
+        // Extract the ID Token from OAuth2 token.
+        rawIDToken, ok := oauth2Token.Extra("id_token").(string)
+        if !ok {
+            // handle missing token
+        }
+    
+        // Parse and verify ID Token payload.
+        idToken, err := verifier.Verify(ctx, rawIDToken)
+        if err != nil {
+            // handle error
+        }
+    
+        // Extract custom claims
+        var claims struct {
+            Email    string `json:"email"`
+            Verified bool   `json:"email_verified"`
+        }
+        if err := idToken.Claims(&claims); err != nil {
+            // handle error
+        }
+    }
+    ```
+
+- These are example uses of the oidc package. Each requires a Google account and the client ID and secret of a registered OAuth2 application. To create one:
+
+  1. Visit your [Google Developer Console](https://console.developers.google.com/apis/dashboard).
+  2. Click "Credentials" on the left column.
+  3. Click the "Create credentials" button followed by "OAuth client ID".
+  4. Select "Web application" and add "http://127.0.0.1:5556/auth/google/callback" as an authorized redirect URI.
+  5. Click create and add the printed client ID and secret to your environment using the following variables:
+
+  ```
+  GOOGLE_OAUTH2_CLIENT_ID
+  GOOGLE_OAUTH2_CLIENT_SECRET
+  ```
+
+  Finally run the examples using the Go tool and navigate to [http://127.0.0.1:5556](http://127.0.0.1:5556/).
+
+  ```
+  go run ./example/idtoken/app.go
+  ```
+
+> ## Redirect to OpenID Connect Server
+>
+> request
+>
+> [https://samples.auth0.com/authorize?](https://openidconnect.net/#)
+>
+> client_id=[kbyuFDidLLm280LIwVFiazOqjO3ty8KH](https://openidconnect.net/#)
+> &redirect_uri= https://openidconnect.net/callback
+> &scope=[openid profile email phone address](https://openidconnect.net/#)
+> &response_type=code
+> &state=23c18ea08147b5466cb45138a003104431ec2368
+>
+> 
+>
+> ## Exchange Code from Token
+>
+> Your Code is
+>
+> a_WAqWqk13s63Hko
+>
+> Now, we need to turn that access code into an access token, by having our server make a request to your token endpoint
+>
+> Request
+>
+> POST https://samples.auth0.com/oauth/token
+> grant_type=authorization_code
+> &client_id=[kbyuFDidLLm280LIwVFiazOqjO3ty8KH](https://openidconnect.net/#)
+> &client_secret=[60Op4HFM0I8ajz0WdiStAbziZ-VFQttXuxixHHs2R7r7-CW8GR79l-mmLqMhc-Sa](https://openidconnect.net/#)
+> &redirect_uri=https://openidconnect.net/callback
+> &code=a_WAqWqk13s63Hko
+>
+> 
+>
+> ## Verify User Token
+>
+> Now, we need to verify that the ID Token sent was from the correct place by validating the JWT's signature
+>
+> Your “id_token” is
+>
+> eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbGllbnRJRCI6ImtieXVGRGlkTExtMjgwTEl3VkZpYXpPcWpPM3R5OEtIIiwiY3JlYXRlZF9hdCI6IjIwMjAtMTItMTFUMTY6Mzk6MDEuMDY3WiIsImVtYWlsIjoiemgxY2hldW5nbHFAZ21haWwuY29tIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsImZhbWlseV9uYW1lIjoiQ2hldW5nIiwiZ2l2ZW5fbmFtZSI6IlppaGVuZyIsImlkZW50aXRpZXMiOlt7InByb3ZpZGVyIjoiZ29vZ2xlLW9hdXRoMiIsInVzZXJfaWQiOiIxMDU0MjAxODQxODU1NDMwNTkwNjAiLCJjb25uZWN0aW9uIjoiZ29vZ2xlLW9hdXRoMiIsImlzU29jaWFsIjp0cnVlfV0sImxvY2FsZSI6InpoLUNOIiwibmFtZSI6IlppaGVuZyBDaGV1bmciLCJuaWNrbmFtZSI6InpoMWNoZXVuZ2xxIiwicGljdHVyZSI6Imh0dHBzOi8vbGgzLmdvb2dsZXVzZXJjb250ZW50LmNvbS9hLS9BT2gxNEdqelQ5a2FGMWl0bUNWZzNUek53S0N4ZkcxdnhrVjdpWi1VZ2dQMD1zOTYtYyIsInVwZGF0ZWRfYXQiOiIyMDIwLTEyLTExVDE2OjM5OjM4LjA3MloiLCJ1c2VyX2lkIjoiZ29vZ2xlLW9hdXRoMnwxMDU0MjAxODQxODU1NDMwNTkwNjAiLCJwZXJzaXN0ZW50Ijp7fSwidXNlcl9tZXRhZGF0YSI6e30sImFwcF9tZXRhZGF0YSI6e30sImlzcyI6Imh0dHBzOi8vc2FtcGxlcy5hdXRoMC5jb20vIiwic3ViIjoiZ29vZ2xlLW9hdXRoMnwxMDU0MjAxODQxODU1NDMwNTkwNjAiLCJhdWQiOiJrYnl1RkRpZExMbTI4MExJd1ZGaWF6T3FqTzN0eThLSCIsImlhdCI6MTYwNzcwNDgwMCwiZXhwIjoxNjA3NzQwODAwfQ.qw_yTIgDyY5lki-Yh8460CEhkykTDxu0_4yquXNmjcU
+>
+> This token is cryptographically signed with the **HS256** algorithim. We'll use the client secret to validate it.
+>
+> 
+>
+> ## The token is valid!
+>
+> Decoded Token Payload
 
 
 
