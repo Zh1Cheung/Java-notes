@@ -442,10 +442,88 @@
   - 协议端点（绑定和位置）
 - 每个SAML系统实体都有一个entity ID，一个用于软件配置的全局唯一标识符，依赖方数据库和客户端Cookie。在线上，每条SAML协议消息都包含发行者的entity ID。
   - 出于身份验证的目的，SAML消息可由发布者进行数字签名。为了验证消息上的签名，消息接收者使用已知属于发行者的公共密钥。类似地，为了加密消息，发行者必须知道属于最终接收者的公共加密密钥。**在签名和加密这两种情况下，必须事先共享受信任的公用密钥。**
+  - **重定向的URL中还要有该消息的签名以保证其不备篡改，验证签名的公钥和算法，都是IDP和SP提前协商好的。**
+- metadata使得SAML能够正常运转，metadata有下列用途：
+  - SP准备传输<samlp:AuthnRequest>给IdP时，SP如何知道IdP是真实的，不是evil IdP（企图钓鱼），为此，**SP在发布authentication request前获取metadata中的可信IdP列表；**
+  - 在上一个场景中，SP如何知道向user发送authentication request？ **SP从metadata中查看IdP预先分配的endpoint location（用于authentication的，IdP除了authentication还有其他功能）**
+  - IdP从SP处接收到<samlp:AuthnRequest>后，IdP如何知道SP是真实的，不是evil SP（企图获取用户信息）？**IdP在发布authentication response前获取metadata中的可信SP列表。**
+  - 在前一个场景中，IdP如何加密SAML assertion，使得仅仅可信的SP能够解密assertion？**IdP使用metadata中的加密证书来加密assertion。**
+  - 紧接着上一场景，IdP如何知道给用户发送authentication response的地址？**IdP从metadata中查看可信SP的预先定义的endpoint location。**
+  - SP如何知道authentication response是来自于一个可信的IdP？ **SP使用metadata中IdP的公钥验证assertion的签名。**
+  - SP如何知道从可信IdP收到的artifact的resolve地址？**SP从metadata查看IdP的artifact resolution service的预先分配的endpoint location。**
+- **metadata保证IdP和SP之间的安全transaction。**
 
 
 
-## SAMLResponse
+
+
+## SAML Request
+
+- 此示例包含一个AuthnRequest。服务提供商在SP-SSO发起的流程中将AuthnRequest发送到身份提供商。
+
+- 有两个示例：
+
+  - 具有签名（HTTP重定向绑定）的AuthnRequest。
+
+    - ```xml
+      <samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="ONELOGIN_809707f0030a5d00620c9d9df97f627afe9dcc24" Version="2.0" ProviderName="SP test" IssueInstant="2014-07-16T23:52:45Z" Destination="http://idp.example.com/SSOService.php" ProtocolBinding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" AssertionConsumerServiceURL="http://sp.example.com/demo1/index.php?acs">
+        <saml:Issuer>http://sp.example.com/demo1/metadata.php</saml:Issuer>
+        <samlp:NameIDPolicy Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress" AllowCreate="true"/>
+        <samlp:RequestedAuthnContext Comparison="exact">
+          <saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport</saml:AuthnContextClassRef>
+        </samlp:RequestedAuthnContext>
+      </samlp:AuthnRequest>
+      
+      
+      
+      ---
+      签名（HTTP重定向绑定
+      bM441nuRIzAjKeMM8RhegMFjZ4L4xPBHhAfHYqgnYDQnSxC++Qn5IocWuzuBGz7JQmT9C57nxjxgbFIatiqUCQN17aYrLn/mWE09C5mJMYlcV68ibEkbR/JKUQ+2u/N+mSD4/C/QvFvuB6BcJaXaz0h7NwGhHROUte6MoGJKMPE=
+      
+      SigAlg=http://www.w3.org/2000/09/xmldsig#rsa-sha1 , RelayState=http://sp.example.com/relaystate
+      
+      
+      ```
+
+  - 内嵌签名的AuthNRequest（HTTP-POST绑定）。
+
+    - ```xml
+      <samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="pfx41d8ef22-e612-8c50-9960-1b16f15741b3" Version="2.0" ProviderName="SP test" IssueInstant="2014-07-16T23:52:45Z" Destination="http://idp.example.com/SSOService.php" ProtocolBinding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" AssertionConsumerServiceURL="http://sp.example.com/demo1/index.php?acs">
+        <saml:Issuer>http://sp.example.com/demo1/metadata.php</saml:Issuer>
+        <ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+          <ds:SignedInfo>
+            <ds:CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+            <ds:SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
+            <ds:Reference URI="#pfx41d8ef22-e612-8c50-9960-1b16f15741b3">
+              <ds:Transforms>
+                <ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
+                <ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+              </ds:Transforms>
+              <ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
+              <ds:DigestValue>yJN6cXUwQxTmMEsPesBP2NkqYFI=</ds:DigestValue>
+            </ds:Reference>
+          </ds:SignedInfo>
+          <ds:SignatureValue>g5eM9yPnKsmmE/Kh2qS7nfK8HoF6yHrAdNQxh70kh8pRI4KaNbYNOL9sF8F57Yd+jO6iNga8nnbwhbATKGXIZOJJSugXGAMRyZsj/rqngwTJk5KmujbqouR1SLFsbo7Iuwze933EgefBbAE4JRI7V2aD9YgmB3socPqAi2Qf97E=</ds:SignatureValue>
+          <ds:KeyInfo>
+            <ds:X509Data>
+              <ds:X509Certificate>MIICajCCAdOgAwIBAgIBADANBgkqhkiG9w0BAQQFADBSMQswCQYDVQQGEwJ1czETMBEGA1UECAwKQ2FsaWZvcm5pYTEVMBMGA1UECgwMT25lbG9naW4gSW5jMRcwFQYDVQQDDA5zcC5leGFtcGxlLmNvbTAeFw0xNDA3MTcwMDI5MjdaFw0xNTA3MTcwMDI5MjdaMFIxCzAJBgNVBAYTAnVzMRMwEQYDVQQIDApDYWxpZm9ybmlhMRUwEwYDVQQKDAxPbmVsb2dpbiBJbmMxFzAVBgNVBAMMDnNwLmV4YW1wbGUuY29tMIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC7vU/6R/OBA6BKsZH4L2bIQ2cqBO7/aMfPjUPJPSn59d/f0aRqSC58YYrPuQODydUABiCknOn9yV0fEYm4bNvfjroTEd8bDlqo5oAXAUAI8XHPppJNz7pxbhZW0u35q45PJzGM9nCv9bglDQYJLby1ZUdHsSiDIpMbGgf/ZrxqawIDAQABo1AwTjAdBgNVHQ4EFgQU3s2NEpYx7wH6bq7xJFKa46jBDf4wHwYDVR0jBBgwFoAU3s2NEpYx7wH6bq7xJFKa46jBDf4wDAYDVR0TBAUwAwEB/zANBgkqhkiG9w0BAQQFAAOBgQCPsNO2FG+zmk5miXEswAs30E14rBJpe/64FBpM1rPzOleexvMgZlr0/smF3P5TWb7H8Fy5kEiByxMjaQmml/nQx6qgVVzdhaTANpIE1ywEzVJlhdvw4hmRuEKYqTaFMLez0sRL79LUeDxPWw7Mj9FkpRYT+kAGiFomHop1nErV6Q==</ds:X509Certificate>
+            </ds:X509Data>
+          </ds:KeyInfo>
+        </ds:Signature>
+        <samlp:NameIDPolicy Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress" AllowCreate="true"/>
+        <samlp:RequestedAuthnContext Comparison="exact">
+          <saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport</saml:AuthnContextClassRef>
+        </samlp:RequestedAuthnContext>
+      </samlp:AuthnRequest>
+      ```
+
+      
+
+
+
+
+
+## SAML Response
 
 - ```xml
   <?xml version="1.0" encoding="utf-8"?>
