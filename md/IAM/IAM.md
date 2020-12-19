@@ -630,6 +630,50 @@
     > 带加密断言的签名SAML响应
     > 带有加密的签名断言的签名的SAML响应
 
+- idp发送samlresponse与sp验证的流程
+
+  > 综合来说，sp和idp会互换metatdata，其中包含了公钥证书。
+  >
+  > 
+  >
+  > 当idp发送response的时候，
+  >
+  > 
+  >
+  > idp用idp的私钥签名， sp用idp的公钥验证
+  >
+  > idp用sp的公钥加密， sp用自己的私钥解密
+  >
+  > 在签名和加密这两种情况下，必须事先共享受信任的公钥。
+  >
+  > 
+  >
+  > 
+  >
+  > metadata保证IdP和SP之间的安全transaction
+  >
+  > 
+  >
+  > SignatureMethod：代表使用的签名方法。这里为RSA-SHA256
+  >
+  > DigestMethod：代表签名过程中使用的摘要方法
+  >
+  > X509Data：代表签名时使用的私钥对应的公钥信息，该值和IDP中的证书信息是保持一致的
+  >
+  > 
+  >
+  > 
+  >
+  > encrypt xml: xml+x.509.cert+encrytpt key(RSA)+encrypt data(sp的AES)
+  >
+  > sign response: xml+x.509.cert+idp私钥
+  >
+  > 
+  >
+  > decrypt xml: xml+sp私钥
+  >
+  > validate xml: xml+x.509.cert+sp私钥（可选）+其他
+
 
 
 
