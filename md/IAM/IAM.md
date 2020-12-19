@@ -634,27 +634,23 @@
 
   > 综合来说，sp和idp会互换metatdata，其中包含了公钥证书。
   >
-  > 
+  >   在签名和加密这两种情况下，必须事先共享受信任的公钥。
   >
-  > 当idp发送response的时候，
-  >
-  > 
-  >
-  > idp用idp的私钥签名， sp用idp的公钥验证
-  >
-  > idp用sp的公钥加密， sp用自己的私钥解密
-  >
-  > 在签名和加密这两种情况下，必须事先共享受信任的公钥。
-  >
-  > 
-  >
-  > 
+  >   sp和idp互相持有对方的公钥
   >
   > metadata保证IdP和SP之间的安全transaction
   >
   > 
   >
-  > SignatureMethod：代表使用的签名方法。这里为RSA-SHA256
+  > 当idp发送response的时候：
+  >
+  >   idp用idp的私钥签名， sp用idp的公钥验证
+  >
+  >   idp用约定的密钥加密， sp用约定的密钥解密
+  >
+  > 
+  >
+  > SignatureMethod：代表使用的签名方法。比如RSA-SHA256
   >
   > DigestMethod：代表签名过程中使用的摘要方法
   >
@@ -662,17 +658,33 @@
   >
   > 
   >
-  > 
+  > encrypt : xml+x.509.cert+encrytpt key(RSA)+encrypt data(AES加密)+AES密钥
   >
-  > encrypt xml: xml+x.509.cert+encrytpt key(RSA)+encrypt data(sp的AES)
-  >
-  > sign response: xml+x.509.cert+idp私钥
+  > sign : xml+x.509.cert+idp私钥
   >
   > 
   >
-  > decrypt xml: xml+sp私钥
+  > decrypt : xml+AES密钥
   >
-  > validate xml: xml+x.509.cert+sp私钥（可选）+其他
+  > validate : xml+x.509.cert（idp公钥）+sp私钥（可选）+其他
+  >
+  > 
+  >
+  > \---
+  >
+  > 
+  >
+  > idp——saml response：
+  >
+  > （（（data密钥加密+密钥）+摘要）私钥签名）
+  >
+  > 
+  >
+  > sp——validate and decrypt
+  >
+  > 公钥验证：（data密钥加密+密钥）
+  >
+  > 密钥解密： data
 
 
 
