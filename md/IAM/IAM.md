@@ -658,33 +658,15 @@
   >
   > 
   >
-  > encrypt : xml+x.509.cert+encrytpt key(RSA)+encrypt data(AES加密)+AES密钥
-  >
-  > sign : xml+x.509.cert+idp私钥
+  > metadata中会有各自的公钥
   >
   > 
   >
-  > decrypt : xml+AES密钥
+  > 加密、解密：sp公钥加密，sp私钥解密
   >
-  > validate : xml+x.509.cert（idp公钥）+sp私钥（可选）+其他
-  >
-  > 
-  >
-  > \---
+  > 签名、验证：idp私钥签名，idp公钥验证
   >
   > 
-  >
-  > idp——saml response：
-  >
-  > （（（data密钥加密+密钥）+摘要）私钥签名）
-  >
-  > 
-  >
-  > sp——validate and decrypt
-  >
-  > 公钥验证：（data密钥加密+密钥）
-  >
-  > 密钥解密： data
 
 
 
